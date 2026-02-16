@@ -1026,8 +1026,6 @@ Para que eu possa obter respostas de faturamento e receber cópias de fatura sem
 **Quando** testes de integração rodam
 **Então** WireMock em `localhost:8082` responde a `GET /api/v1/users/{id}` e `POST /api/v1/invoices/send`, incluindo asserções para cabeçalho `Authorization: Bearer` e propagação de `correlationId`; injeção de falhas suporta delay configurável > C-58, erros 4xx/5xx e conexão recusada
 
-> **Nota:** O PRD originalmente especificou `POST /api/v1/users/{id}` para `get-user-data`. Alterado para `GET` pois é uma operação de leitura. Sinalizado para revisão do Arquiteto — a ponte é agnóstica ao verbo (lê método HTTP da config de definição de ferramenta), então isso afeta apenas o arquivo de definição de ferramenta e stubs WireMock.
-
 ---
 
 ## Épico 6: Endurecimento de Segurança

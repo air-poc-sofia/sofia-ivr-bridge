@@ -573,101 +573,101 @@ Every configurable parameter in the system. Zero magic numbers in code — all v
 
 | ID | Property | Type | Default | Per-Env | Validation | Ref |
 | --- | ---------- | ------ | --------- | --------- | ------------ | ----- |
-| C-01 | `ivr.acs.callback-base-url` | String | — | **Required** | Valid URL | — |
-| C-02 | `ivr.acs.endpoint` | String | — | **Required** | Valid URL | SEC-REQ-11 |
-| C-03 | `ivr.acs.ring-timeout-seconds` | int | `45` | Optional | 15–120 | REQ-R5.3 |
+| C-01 | `sofia.acs.callback-base-url` | String | — | **Required** | Valid URL | — |
+| C-02 | `sofia.acs.endpoint` | String | — | **Required** | Valid URL | SEC-REQ-11 |
+| C-03 | `sofia.acs.ring-timeout-seconds` | int | `45` | Optional | 15–120 | REQ-R5.3 |
 
 ### ACS WebSocket Server (JSR 356)
 
 | ID | Property | Type | Default | Per-Env | Validation | Ref |
 | --- | ---------- | ------ | --------- | --------- | ------------ | ----- |
-| C-04 | `ivr.websocket.server.path` | String | `/ws` | Rarely | Starts with `/` | — |
-| C-05 | `ivr.websocket.server.idle-timeout-ms` | long | `5000` | Optional | 1000–30000 | REQ-R1.2 |
-| C-06 | `ivr.websocket.server.max-message-size` | int | `65536` | Optional | 1024–1048576 | — |
+| C-04 | `sofia.websocket.server.path` | String | `/ws` | Rarely | Starts with `/` | — |
+| C-05 | `sofia.websocket.server.idle-timeout-ms` | long | `5000` | Optional | 1000–30000 | REQ-R1.2 |
+| C-06 | `sofia.websocket.server.max-message-size` | int | `65536` | Optional | 1024–1048576 | — |
 
 ### Voice Live WebSocket Client
 
 | ID | Property | Type | Default | Per-Env | Validation | Ref |
 | --- | ---------- | ------ | --------- | --------- | ------------ | ----- |
-| C-07 | `ivr.voicelive.endpoint` | String | — | **Required** | Valid WSS URL | — |
-| C-08 | `ivr.voicelive.api-version` | String | `2025-05-01-preview` | Optional | Non-blank | — |
-| C-09 | `ivr.voicelive.model` | String | — | **Required** | Non-blank | — |
-| C-10 | `ivr.voicelive.connect-timeout-ms` | long | `3000` | Optional | 500–10000 | REQ-R2.3 |
-| C-11 | `ivr.voicelive.idle-timeout-ms` | long | `5000` | Optional | 1000–30000 | REQ-R1.2 |
+| C-07 | `sofia.voicelive.endpoint` | String | — | **Required** | Valid WSS URL | — |
+| C-08 | `sofia.voicelive.api-version` | String | `2025-05-01-preview` | Optional | Non-blank | — |
+| C-09 | `sofia.voicelive.model` | String | — | **Required** | Non-blank | — |
+| C-10 | `sofia.voicelive.connect-timeout-ms` | long | `3000` | Optional | 500–10000 | REQ-R2.3 |
+| C-11 | `sofia.voicelive.idle-timeout-ms` | long | `5000` | Optional | 1000–30000 | REQ-R1.2 |
 
 ### Voice Live Session Configuration
 
 | ID | Property | Type | Default | Per-Env | Validation | Ref |
 | --- | ---------- | ------ | --------- | --------- | ------------ | ----- |
-| C-12 | `ivr.voicelive.system-prompt` | String | — | **Required** | Non-blank | — |
-| C-13 | `ivr.voicelive.voice` | String | `en-US-Aria:DragonHDLatestNeural` | Optional | Valid voice ID | — |
-| C-14 | `ivr.voicelive.vad.type` | String | `semantic` | Optional | `semantic` or `server` | UX-REQ-6 |
-| C-15 | `ivr.voicelive.vad.threshold` | double | `0.3` | Optional | 0.0–1.0 | UX-REQ-6 |
-| C-16 | `ivr.voicelive.vad.silence-duration-ms` | int | `200` | Optional | 50–2000 | UX-REQ-6 |
-| C-17 | `ivr.voicelive.noise-suppression` | boolean | `true` | Optional | — | UX-REQ-6 |
-| C-18 | `ivr.voicelive.echo-cancellation` | boolean | `true` | Optional | — | UX-REQ-6 |
+| C-12 | `sofia.voicelive.system-prompt` | String | — | **Required** | Non-blank | — |
+| C-13 | `sofia.voicelive.voice` | String | `en-US-Aria:DragonHDLatestNeural` | Optional | Valid voice ID | — |
+| C-14 | `sofia.voicelive.vad.type` | String | `semantic` | Optional | `semantic` or `server` | UX-REQ-6 |
+| C-15 | `sofia.voicelive.vad.threshold` | double | `0.3` | Optional | 0.0–1.0 | UX-REQ-6 |
+| C-16 | `sofia.voicelive.vad.silence-duration-ms` | int | `200` | Optional | 50–2000 | UX-REQ-6 |
+| C-17 | `sofia.voicelive.noise-suppression` | boolean | `true` | Optional | — | UX-REQ-6 |
+| C-18 | `sofia.voicelive.echo-cancellation` | boolean | `true` | Optional | — | UX-REQ-6 |
 
 ### Audio Bridge
 
 | ID | Property | Type | Default | Per-Env | Validation | Ref |
 | --- | ---------- | ------ | --------- | --------- | ------------ | ----- |
-| C-19 | `ivr.audio.format` | String | `pcm_24k_mono` | Immutable | Fixed | AP-1 |
-| C-20 | `ivr.audio.sample-rate` | int | `24000` | Immutable | Fixed | AP-1 |
-| C-21 | `ivr.audio.silence-packet-threshold` | int | `10` | Optional | 1–100 | — |
+| C-19 | `sofia.audio.format` | String | `pcm_24k_mono` | Immutable | Fixed | AP-1 |
+| C-20 | `sofia.audio.sample-rate` | int | `24000` | Immutable | Fixed | AP-1 |
+| C-21 | `sofia.audio.silence-packet-threshold` | int | `10` | Optional | 1–100 | — |
 
 ### Resilience
 
 | ID | Property | Type | Default | Per-Env | Validation | Ref |
 | --- | ---------- | ------ | --------- | --------- | ------------ | ----- |
-| C-22 | `ivr.resilience.circuit-breaker.failure-threshold` | int | `3` | Optional | 1–20 | REQ-R2.1 |
-| C-23 | `ivr.resilience.circuit-breaker.half-open-delay-ms` | long | `30000` | Optional | 5000–300000 | REQ-R2.1 |
-| C-24 | `ivr.resilience.circuit-breaker.success-threshold` | int | `1` | Optional | 1–5 | REQ-R2.1 |
-| C-25 | `ivr.resilience.health-probe.interval-ms` | long | `10000` | Optional | 5000–60000 | REQ-R2.4 |
-| C-26 | `ivr.resilience.admission.max-calls` | int | `50` | **Per env** | 1–1000 | REQ-R4.1 |
-| C-27 | `ivr.resilience.admission.rejection-threshold-pct` | int | `80` | Optional | 50–100 | REQ-R4.1 |
-| C-28 | `ivr.resilience.reconnect-window-ms` | long | `5000` | Optional | 0–30000 | REQ-R1.3 |
+| C-22 | `sofia.resilience.circuit-breaker.failure-threshold` | int | `3` | Optional | 1–20 | REQ-R2.1 |
+| C-23 | `sofia.resilience.circuit-breaker.half-open-delay-ms` | long | `30000` | Optional | 5000–300000 | REQ-R2.1 |
+| C-24 | `sofia.resilience.circuit-breaker.success-threshold` | int | `1` | Optional | 1–5 | REQ-R2.1 |
+| C-25 | `sofia.resilience.health-probe.interval-ms` | long | `10000` | Optional | 5000–60000 | REQ-R2.4 |
+| C-26 | `sofia.resilience.admission.max-calls` | int | `50` | **Per env** | 1–1000 | REQ-R4.1 |
+| C-27 | `sofia.resilience.admission.rejection-threshold-pct` | int | `80` | Optional | 50–100 | REQ-R4.1 |
+| C-28 | `sofia.resilience.reconnect-window-ms` | long | `5000` | Optional | 0–30000 | REQ-R1.3 |
 
 ### Call Lifecycle
 
 | ID | Property | Type | Default | Per-Env | Validation | Ref |
 | --- | ---------- | ------ | --------- | --------- | ------------ | ----- |
-| C-29 | `ivr.call.max-duration-seconds` | int | `600` | Optional | 60–3600 | REQ-R3.5 |
-| C-30 | `ivr.call.max-duration-warning-seconds` | int | `30` | Optional | 10–120 | UX-REQ-9 |
-| C-31 | `ivr.call.linked-lifecycle-timeout-ms` | long | `3000` | Optional | 1000–10000 | REQ-R1.1 |
-| C-32 | `ivr.call.time-to-first-audio-timeout-ms` | long | `5000` | Optional | 2000–15000 | UX-REQ-3 |
-| C-33 | `ivr.call.comfort-tone-delay-ms` | long | `2000` | Optional | 500–5000 | UX-REQ-1 |
+| C-29 | `sofia.call.max-duration-seconds` | int | `600` | Optional | 60–3600 | REQ-R3.5 |
+| C-30 | `sofia.call.max-duration-warning-seconds` | int | `30` | Optional | 10–120 | UX-REQ-9 |
+| C-31 | `sofia.call.linked-lifecycle-timeout-ms` | long | `3000` | Optional | 1000–10000 | REQ-R1.1 |
+| C-32 | `sofia.call.time-to-first-audio-timeout-ms` | long | `5000` | Optional | 2000–15000 | UX-REQ-3 |
+| C-33 | `sofia.call.comfort-tone-delay-ms` | long | `2000` | Optional | 500–5000 | UX-REQ-1 |
 
 ### Graceful Shutdown
 
 | ID | Property | Type | Default | Per-Env | Validation | Ref |
 | --- | ---------- | ------ | --------- | --------- | ------------ | ----- |
-| C-34 | `ivr.shutdown.drain-timeout-seconds` | int | `90` | Optional | 30–300 | REQ-R3.1 |
+| C-34 | `sofia.shutdown.drain-timeout-seconds` | int | `90` | Optional | 30–300 | REQ-R3.1 |
 
 ### Fallback Prompts
 
 | ID | Property | Type | Default | Per-Env | Validation | Ref |
 | --- | ---------- | ------ | --------- | --------- | ------------ | ----- |
-| C-35 | `ivr.prompts.comfort-tone-file` | String | `classpath:prompts/comfort-tone.wav` | Optional | Valid resource | UX-REQ-1 |
-| C-36 | `ivr.prompts.fallback-greeting-file` | String | `classpath:prompts/fallback-greeting.wav` | Optional | Valid resource | UX-REQ-3 |
-| C-37 | `ivr.prompts.error-apology-file` | String | `classpath:prompts/error-apology.wav` | Optional | Valid resource | UX-REQ-10 |
-| C-38 | `ivr.prompts.busy-file` | String | `classpath:prompts/busy.wav` | Optional | Valid resource | UX-REQ-11 |
-| C-39 | `ivr.prompts.service-unavailable-file` | String | `classpath:prompts/service-unavailable.wav` | Optional | Valid resource | REQ-R2.2 |
+| C-35 | `sofia.prompts.comfort-tone-file` | String | `classpath:prompts/comfort-tone.wav` | Optional | Valid resource | UX-REQ-1 |
+| C-36 | `sofia.prompts.fallback-greeting-file` | String | `classpath:prompts/fallback-greeting.wav` | Optional | Valid resource | UX-REQ-3 |
+| C-37 | `sofia.prompts.error-apology-file` | String | `classpath:prompts/error-apology.wav` | Optional | Valid resource | UX-REQ-10 |
+| C-38 | `sofia.prompts.busy-file` | String | `classpath:prompts/busy.wav` | Optional | Valid resource | UX-REQ-11 |
+| C-39 | `sofia.prompts.service-unavailable-file` | String | `classpath:prompts/service-unavailable.wav` | Optional | Valid resource | REQ-R2.2 |
 
 ### Security
 
 | ID | Property | Type | Default | Per-Env | Validation | Ref |
 | --- | ---------- | ------ | --------- | --------- | ------------ | ----- |
-| C-40 | `ivr.security.jwt.enabled` | boolean | `true` | Optional | — | SEC-REQ-1 |
-| C-41 | `ivr.security.jwt.issuer` | String | — | Required when enabled | Valid URL | SEC-REQ-1 |
-| C-42 | `ivr.security.jwt.audience` | String | — | Required when enabled | Non-blank | SEC-REQ-1 |
-| C-43 | `ivr.security.event-grid.validation-enabled` | boolean | `true` | Optional | — | SEC-REQ-2 |
-| C-44 | `ivr.security.jwt.acs-oidc-metadata-url` | String | ACS OIDC well-known URL | Required when enabled | Valid URL | SEC-REQ-1 |
-| C-45 | `ivr.security.event-grid.max-event-age-seconds` | int | `300` | Optional | 60–600 | SEC-REQ-14 |
-| C-46 | `ivr.security.websocket.rate-limit-per-ip` | int | `10` | Optional | 1–100 | SEC-REQ-15 |
-| C-47 | `ivr.security.websocket.rate-limit-window-seconds` | int | `60` | Optional | 10–300 | SEC-REQ-15 |
+| C-40 | `sofia.security.jwt.enabled` | boolean | `true` | Optional | — | SEC-REQ-1 |
+| C-41 | `sofia.security.jwt.issuer` | String | — | Required when enabled | Valid URL | SEC-REQ-1 |
+| C-42 | `sofia.security.jwt.audience` | String | — | Required when enabled | Non-blank | SEC-REQ-1 |
+| C-43 | `sofia.security.event-grid.validation-enabled` | boolean | `true` | Optional | — | SEC-REQ-2 |
+| C-44 | `sofia.security.jwt.acs-oidc-metadata-url` | String | ACS OIDC well-known URL | Required when enabled | Valid URL | SEC-REQ-1 |
+| C-45 | `sofia.security.event-grid.max-event-age-seconds` | int | `300` | Optional | 60–600 | SEC-REQ-14 |
+| C-46 | `sofia.security.websocket.rate-limit-per-ip` | int | `10` | Optional | 1–100 | SEC-REQ-15 |
+| C-47 | `sofia.security.websocket.rate-limit-window-seconds` | int | `60` | Optional | 10–300 | SEC-REQ-15 |
 | C-48 | `management.server.port` | int | `8081` | Optional | 1024–65535 | SEC-REQ-9 |
-| C-49 | `ivr.security.pii.phone-mask-visible-digits` | int | `4` | Optional | 0–4 | SEC-REQ-6 |
-| C-50 | `ivr.security.callback-token-length` | int | `32` | Optional | 16–64 | SEC-REQ-4 |
+| C-49 | `sofia.security.pii.phone-mask-visible-digits` | int | `4` | Optional | 0–4 | SEC-REQ-6 |
+| C-50 | `sofia.security.callback-token-length` | int | `32` | Optional | 16–64 | SEC-REQ-4 |
 
 ### Profile Override Matrix
 
@@ -690,12 +690,12 @@ Every configurable parameter in the system. Zero magic numbers in code — all v
 
 | ID | Property | Type | Default | Per-Env | Validation | Ref | Priority |
 | ---- | ----------- | ------ | --------- | --------- | ------------ | ----- | ---------- |
-| C-51 | `ivr.voicelive.session-init-timeout-ms` | long | `5000` | Optional | 500–15000 | Pre-mortem #1 | P0 |
-| C-52 | `ivr.call.orphan-reaper-interval-ms` | long | `60000` | test: `1000` | 1000–300000 | Pre-mortem #2 | P0 |
-| C-53 | `ivr.call.allowed-numbers-pattern` | String | `.*` (all) | Optional | Valid regex | Red Team #1 | **P1** |
-| C-54 | `ivr.ws.idle-timeout-ms` | long | `10000` | test: `2000` | 1000–60000 | First Principles + Red Team | P0 |
-| C-55 | `ivr.voicelive.stall-timeout-ms` | long | `5000` | Optional | 1000–30000 | FR46, NFR-R13 | P0 |
-| C-56 | `ivr.callback.dedup-ttl-seconds` | int | `60` | test: `5` | 10–600 | FR5, NFR-R6 | P0 |
+| C-51 | `sofia.voicelive.session-init-timeout-ms` | long | `5000` | Optional | 500–15000 | Pre-mortem #1 | P0 |
+| C-52 | `sofia.call.orphan-reaper-interval-ms` | long | `60000` | test: `1000` | 1000–300000 | Pre-mortem #2 | P0 |
+| C-53 | `sofia.call.allowed-numbers-pattern` | String | `.*` (all) | Optional | Valid regex | Red Team #1 | **P1** |
+| C-54 | `sofia.ws.idle-timeout-ms` | long | `10000` | test: `2000` | 1000–60000 | First Principles + Red Team | P0 |
+| C-55 | `sofia.voicelive.stall-timeout-ms` | long | `5000` | Optional | 1000–30000 | FR46, NFR-R13 | P0 |
+| C-56 | `sofia.callback.dedup-ttl-seconds` | int | `60` | test: `5` | 10–600 | FR5, NFR-R6 | P0 |
 
 **P1 configs** are wired in code but **not enforced** in MVP. Default values ensure they are inert (`.*` matches all callers). This avoids test coverage confusion — P1 configs have explicit priority tags.
 
@@ -703,11 +703,11 @@ Every configurable parameter in the system. Zero magic numbers in code — all v
 
 | ID | Property | Type | Default | Per-Env | Validation | Ref | Priority |
 | ---- | ----------- | ------ | --------- | --------- | ------------ | ----- | ---------- |
-| C-57 | `ivr.tool-call.gateway-base-url` | String | — | **Required** | Valid HTTPS URL | AP-3, FR48 | P0 |
-| C-57b | `ivr.tool-call.gateway-auth-scope` | String | — | **Required** | Non-blank (Entra ID audience URI) | SEC-REQ-18, FR48 | P0 |
-| C-58 | `ivr.tool-call.response-timeout-ms` | long | `5000` | Optional | 1000–30000 | FR50, AC-23 | P0 |
-| C-59 | `ivr.tool-call.max-concurrent` | int | `3` | Optional | 1–10 | FR50 | P0 |
-| C-60 | `ivr.tool-call.definitions-file` | String | `classpath:tool-definitions.json` | Optional | Valid resource path, valid JSON | FR51, FR13 | P0 |
+| C-57 | `sofia.tool-call.gateway-base-url` | String | — | **Required** | Valid HTTPS URL | AP-3, FR48 | P0 |
+| C-57b | `sofia.tool-call.gateway-auth-scope` | String | — | **Required** | Non-blank (Entra ID audience URI) | SEC-REQ-18, FR48 | P0 |
+| C-58 | `sofia.tool-call.response-timeout-ms` | long | `5000` | Optional | 1000–30000 | FR50, AC-23 | P0 |
+| C-59 | `sofia.tool-call.max-concurrent` | int | `3` | Optional | 1–10 | FR50 | P0 |
+| C-60 | `sofia.tool-call.definitions-file` | String | `classpath:tool-definitions.json` | Optional | Valid resource path, valid JSON | FR51, FR13 | P0 |
 
 **Total: 61 configurable parameters** across 12 components — zero magic numbers in code.
 
@@ -893,7 +893,7 @@ If any of these occur, log `ERROR` and force-transition to CLOSING:
 | ---- | ----- | ---------- | ------------- | ----------------- |
 | AS-1 | Spring Boot Actuator endpoints not addressed in any PRD section — `/actuator/env` can expose all config including secrets | **Critical** | Bind actuator to separate management port (8081). Expose only `/health` and `/ready` on management port. Disable all other actuator endpoints. | SEC-REQ-9 |
 | AS-2 | Error responses may contain stack traces, class names, Spring internal details | High | Configure `server.error.include-stacktrace=never`, custom error handler returns generic JSON | SEC-REQ-10 |
-| AS-3 | ACS connection string stored in Key Vault is itself a secret that could be leaked | High | **Eliminated** — use `DefaultAzureCredential` with `ivr.acs.endpoint` (non-secret URL). No connection string anywhere. | SEC-REQ-11 |
+| AS-3 | ACS connection string stored in Key Vault is itself a secret that could be leaked | High | **Eliminated** — use `DefaultAzureCredential` with `sofia.acs.endpoint` (non-secret URL). No connection string anywhere. | SEC-REQ-11 |
 | AS-4 | Voice Live API key could be used as fallback auth | Medium | Disable API key access on Foundry resource. Force managed identity only. | SEC-REQ-12 |
 | AS-5 | No rate limiting on WebSocket connections — single IP could exhaust connection pool. Gateway HTTP connection pool not bounded. | Medium | Per-IP rate limiter on WebSocket handshake endpoint. Default: 10 connections per 60 seconds. `java.net.http.HttpClient` connection pool bounded by C-59 max concurrent tool calls. | SEC-REQ-15 |
 | AS-6 | No mechanism to detect or prevent prompt injection in system prompt or user audio | Medium | System prompt guardrails + Azure AI Content Safety integration for abuse detection. | SEC-REQ-17 |
@@ -917,7 +917,7 @@ If any of these occur, log `ERROR` and force-transition to CLOSING:
 | SEC-REQ-6 | **PII Masking** — All phone numbers in log output masked to last N digits (default: 4). Implemented as a structured logging filter applied to all log appenders. | S-3 | AC-18 | C-49 |
 | SEC-REQ-9 | **Actuator Lockdown** — Bind Spring Boot Actuator to separate management port (default: 8081). Expose only `/actuator/health` and `/actuator/ready`. Disable all other actuator endpoints. Management port is internal-only (no external load balancer routing). | AS-1 | AC-19 | C-48 |
 | SEC-REQ-10 | **Error Response Hardening** — HTTP error responses contain no stack traces, no class names, no Spring-specific internal details. Configure `server.error.include-stacktrace=never`. Custom error handler returns generic JSON `{"error": "Internal Server Error"}`. | AS-2 | AC-20 | — |
-| SEC-REQ-11 | **ACS Managed Identity Auth** — Use `DefaultAzureCredential` for all ACS Call Automation API calls. No connection strings anywhere (code, config, Key Vault). Config property is `ivr.acs.endpoint` (non-secret URL). | AS-3 | AC-22 | C-02 |
+| SEC-REQ-11 | **ACS Managed Identity Auth** — Use `DefaultAzureCredential` for all ACS Call Automation API calls. No connection strings anywhere (code, config, Key Vault). Config property is `sofia.acs.endpoint` (non-secret URL). | AS-3 | AC-22 | C-02 |
 | SEC-REQ-14 | **Event Replay Protection** — Validate `eventTime` on Event Grid events. Reject events older than configurable max age (default: 5 minutes). | S-5 | AC-16 | C-45 |
 
 ### P1 — Important, Post-MVP OK
@@ -1195,7 +1195,7 @@ Thiago receives the system prompt template from the development team — a plain
 - Escalation rules
 - Language and formality level
 
-He saves the file and hands it to the ops team. They update config property `C-12` (`ivr.voicelive.system-prompt`) in the production config — a **config-only deploy**. No code changes, no build, no developer required. The new prompt goes live within minutes (AP-6: business logic belongs in the system prompt, not the code).
+He saves the file and hands it to the ops team. They update config property `C-12` (`sofia.voicelive.system-prompt`) in the production config — a **config-only deploy**. No code changes, no build, no developer required. The new prompt goes live within minutes (AP-6: business logic belongs in the system prompt, not the code).
 
 #### The Feedback Loop
 
@@ -1358,16 +1358,16 @@ Already fully specified in Security Requirements (SEC-REQ-1 through SEC-REQ-17).
 | **WebSocket connections** | SEC-REQ-15: Connection rate limiting per source IP | Prevent WS flood |
 | **HTTP callbacks** (`/api/v1/callbacks`) | **Trust ACS** + Caffeine cache deduplication (key: `callId` + `eventType` + `correlationId`, `expireAfterWrite` TTL) | ACS controls callback frequency; dedup catches retries/bugs without full rate limiting. Use Caffeine (already in Spring Boot starter) — not a custom data structure |
 | **Event Grid** (`/api/v1/events`) | **Trust Event Grid** — built-in retry with exponential backoff | Event Grid self-throttles; 429 would cause unnecessary retries |
-| **Concurrent call admission** | Config param `C-35` (`ivr.call.max-concurrent`) | Reject new calls with 503 when at capacity |
+| **Concurrent call admission** | Config param `C-35` (`sofia.call.max-concurrent`) | Reject new calls with 503 when at capacity |
 
 ### Resilience & Lifecycle
 
 | Concern | Mechanism | Config |
 | --------- | ----------- | -------- |
-| **Voice Live session init timeout** | If `session.created` not received within timeout → disconnect caller gracefully, log `VL_SESSION_TIMEOUT` | `C-51: ivr.voicelive.session-init-timeout-ms` (default 5000) |
-| **Orphan session reaper** | Periodic sweep terminates sessions older than max-call-duration + buffer. Catches calls where neither WS close nor callback arrived | `C-52: ivr.call.orphan-reaper-interval-ms` (default 60000; test: 1000). 60s is proportional to typical call durations — 30s was too aggressive (60 sweeps per 30-min call) |
+| **Voice Live session init timeout** | If `session.created` not received within timeout → disconnect caller gracefully, log `VL_SESSION_TIMEOUT` | `C-51: sofia.voicelive.session-init-timeout-ms` (default 5000) |
+| **Orphan session reaper** | Periodic sweep terminates sessions older than max-call-duration + buffer. Catches calls where neither WS close nor callback arrived | `C-52: sofia.call.orphan-reaper-interval-ms` (default 60000; test: 1000). 60s is proportional to typical call durations — 30s was too aggressive (60 sweeps per 30-min call) |
 | **Dual cleanup path** | Call state cleaned up on *either* WS close *or* callback, whichever arrives first. Cleanup is idempotent — safe to trigger from both | — |
-| **Idle WebSocket detection** | If no audio frames received within timeout after WS upgrade → terminate connection. Catches malicious/broken connections | `C-54: ivr.ws.idle-timeout-ms` (default 10000) |
+| **Idle WebSocket detection** | If no audio frames received within timeout after WS upgrade → terminate connection. Catches malicious/broken connections | `C-54: sofia.ws.idle-timeout-ms` (default 10000) |
 | **Lenient JSON parsing** | Jackson `FAIL_ON_UNKNOWN_PROPERTIES = false` for all Voice Live event deserialization | — |
 | **Parse error monitoring** | Counter metric for JSON parse failures on Voice Live events — spikes indicate schema drift | Metric: `ivr.voicelive.parse_errors_total` |
 

@@ -1026,8 +1026,6 @@ So that I can get billing answers and receive invoice copies without being trans
 **When** integration tests run
 **Then** WireMock at `localhost:8082` responds to `GET /api/v1/users/{id}` and `POST /api/v1/invoices/send`, including assertions for `Authorization: Bearer` header and `correlationId` propagation; fault injection supports configurable delay > C-58, 4xx/5xx errors, and connection refused
 
-> **Note:** The PRD originally specified `POST /api/v1/users/{id}` for `get-user-data`. Changed to `GET` since this is a read operation. Flagged for Architect review — the bridge is verb-agnostic (reads HTTP method from tool definition config), so this only affects the tool definition file and WireMock stubs.
-
 ---
 
 ## Epic 6: Security Hardening

@@ -1683,7 +1683,7 @@ All 10 architectural decisions are internally consistent:
 
 - Naming conventions (§4.1) consistent across all file tree entries and examples
 - Configuration prefix `sofia.*` used uniformly in all `@ConfigurationProperties` annotations and `application.yaml` examples
-- Note: The PRD Configuration Catalog uses `ivr.*` prefix (C-01 through C-60) as requirements-level identifiers. The architecture standardizes implementation on `sofia.*`. Mapping: PRD `ivr.acs.*` → code `sofia.acs.*`, PRD `ivr.voicelive.*` → code `sofia.voice-live.*`, etc. AI agents implementing stories should translate PRD C-xx references to `sofia.*` properties.
+- PRD Configuration Catalog (C-01 through C-60) aligned to use `sofia.*` prefix, matching the architecture’s `@ConfigurationProperties` convention. No prefix translation needed during implementation.
 - JSON format (camelCase), date format (ISO-8601 UTC), error shape (RFC 9457), and logging MDC keys (OTel dot-separated) are consistent throughout
 - Voice Live wire format pass-through rule (§4.3.4) aligns with sealed record modeling (§4.4.1)
 
@@ -1766,7 +1766,7 @@ Six gaps were identified during validation. All were **alignment details**, not 
 
 | # | Gap | Resolution |
 |---|-----|------------|
-| G-1 | Config prefix `sofia.*` (architecture) vs `ivr.*` (PRD) | **Kept `sofia.*`** as the implementation prefix. Documented the PRD→code mapping in §6.1 Pattern Consistency. AI agents translate PRD C-xx references to `sofia.*` properties. |
+| G-1 | Config prefix `sofia.*` (architecture) vs `ivr.*` (PRD) | **Resolved** — PRD Configuration Catalog updated to use `sofia.*` prefix, aligning with the architecture’s `@ConfigurationProperties` convention. No prefix translation needed. |
 | G-2 | Admission control had no architectural component | Added to `EventGridController` file-tree annotation and documented pattern in §6.3 |
 | G-3 | WebSocket per-IP rate limiting had no pattern | Added to `AcsHandshakeInterceptor` file-tree annotation and documented pattern in §6.3 |
 | G-4 | `CallState.java` file-tree comment listed wrong enum values | Updated to match CC-2: INITIALIZING, STREAMING, TERMINATING, TERMINATED |
