@@ -220,7 +220,7 @@ A WebSocket server that pretends to be Voice Live, accepting our outbound connec
 
 A WireMock instance simulating the APIM gateway for tool call HTTP requests:
 
-- Responds to `POST /api/v1/users/{id}` (GET user data tool call)
+- Responds to `GET /api/v1/users/{id}` (get-user-data tool call)
 - Responds to `POST /api/v1/invoices/send` (send invoice tool calls)
 - **Fault injection:** configurable response delay (> C-58 for timeout testing), 4xx/5xx HTTP errors, connection refused
 - **Assertions:** verify request includes `Authorization: Bearer <token>` header, verify `correlationId` propagation
