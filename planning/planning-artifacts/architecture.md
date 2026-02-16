@@ -1,5 +1,9 @@
 ---
-stepsCompleted: [1, 2, 3, 4, 5, 6]
+stepsCompleted: [1, 2, 3, 4, 5, 6, 7, 8]
+workflowType: 'architecture'
+lastStep: 8
+status: 'complete'
+completedAt: '2025-07-15'
 inputDocuments:
   - 'planning/planning-artifacts/prd.md'
   - 'URA - Architecture Q&A.md'
@@ -227,6 +231,8 @@ curl https://start.spring.io/starter.zip \
 | `azure-identity` | Azure SDK BOM | `DefaultAzureCredential` for managed identity |
 | `azure-sdk-bom` | Maven Central | Version management for all `com.azure` artifacts |
 | `opentelemetry-spring-boot-starter` | OTel | OpenTelemetry autoconfig — traces, metrics, log bridge |
+| `resilience4j-spring-boot3` | Resilience4j | Circuit breaker for tool call dispatch (Decision 6) |
+| `logstash-logback-encoder` | Maven Central | JSON structured logging for Logback (Decision 10) |
 | `spring-boot-starter-test` | Spring Boot BOM (test) | JUnit 5, Mockito, AssertJ |
 
 #### BOM Ordering (Critical)
@@ -1462,7 +1468,7 @@ sofia-ivr-bridge/
 │   │   │   ├── SofiaIvrApplication.java                  # @SpringBootApplication entry point
 │   │   │   │
 │   │   │   ├── webhook/                                   # --- Call Handling & Callbacks ---
-│   │   │   │   ├── EventGridController.java               # POST /api/events — IncomingCall + validation handshake
+│   │   │   │   ├── EventGridController.java               # POST /api/events — IncomingCall + validation handshake + admission control guard (REQ-R4.1)
 │   │   │   │   ├── AcsCallbackController.java             # POST /api/callbacks/events — mid-call events
 │   │   │   │   ├── CallAutomationService.java             # Wraps CallAutomationClient (answer, hangup, play)
 │   │   │   │   └── EventGridEvent.java                    # Minimal DTO for Event Grid envelope parsing
@@ -1470,7 +1476,7 @@ sofia-ivr-bridge/
 │   │   │   ├── websocket/                                 # --- ACS Audio WebSocket Server ---
 │   │   │   │   ├── AcsAudioEndpoint.java                  # @ServerEndpoint — PCM 24K in/out from ACS
 │   │   │   │   ├── AcsAudioEndpointConfig.java            # ServerEndpointExporter bean + auth handshake
-│   │   │   │   └── AcsHandshakeInterceptor.java           # JWT validation on WebSocket upgrade
+│   │   │   │   └── AcsHandshakeInterceptor.java           # JWT validation + per-IP rate limiting (SEC-REQ-15) on WebSocket upgrade
 │   │   │   │
 │   │   │   ├── bridge/                                    # --- Audio Bridge & Voice Live Client ---
 │   │   │   │   ├── AudioBridgeService.java                # Orchestrates bidirectional audio forwarding
@@ -1484,8 +1490,8 @@ sofia-ivr-bridge/
 │   │   │   │   └── ToolDefinitionRegistry.java            # Loads tool definitions for session.update
 │   │   │   │
 │   │   │   ├── model/                                     # --- Domain Types ---
-│   │   │   │   ├── CallSession.java                       # Call state record (12 states, 33 transitions)
-│   │   │   │   ├── CallState.java                         # Enum: RINGING, CONNECTED, BRIDGED, TERMINATING, etc.
+│   │   │   │   ├── CallSession.java                       # Call state record (per CC-2 state machine)
+│   │   │   │   ├── CallState.java                         # Enum: INITIALIZING, STREAMING, TERMINATING, TERMINATED (CC-2)
 │   │   │   │   ├── CallSessionStore.java                  # ConcurrentHashMap wrapper with Optional returns
 │   │   │   │   ├── InboundEvent.java                      # sealed interface — Voice Live → Service events
 │   │   │   │   ├── OutboundEvent.java                     # sealed interface — Service → Voice Live events
@@ -1526,9 +1532,9 @@ sofia-ivr-bridge/
 │   │       ├── application-prod.yaml                      # Prod overrides (if needed)
 │   │       ├── logback-spring.xml                         # Profile-switched: plain text (local) / JSON (prod)
 │   │       └── tool-definitions/                          # Tool JSON schemas for Voice Live session.update
-│   │           ├── check-balance.json
-│   │           ├── get-customer-info.json
-│   │           └── create-ticket.json
+│   │           ├── get-user-data.json                     # GET user/account data (PRD tool #1)
+│   │           ├── send-invoice-registered-email.json     # Send invoice to registered email (PRD tool #2)
+│   │           └── send-invoice-provided-email.json       # Send invoice to user-provided email (PRD tool #3)
 │   │
 │   └── test/
 │       ├── java/com/sofia/ivr/
@@ -1675,3 +1681,237 @@ AcsCallbackController ──→ CallSessionStore.get()
 #### 5.5.3 Tool Definitions
 
 Tool JSON schemas live in `src/main/resources/tool-definitions/`. Each file defines one tool per the OpenAI function calling schema. `ToolDefinitionRegistry` loads them at startup and includes them in `session.update` sent to Voice Live.
+
+---
+
+## Section 6: Architecture Validation Results
+
+_Established in Step 7 — comprehensive validation of coherence, requirements coverage, implementation readiness, and gap resolution._
+
+### 6.1 Coherence Validation ✅
+
+**Decision Compatibility: PASS**
+
+All 10 architectural decisions are internally consistent:
+
+- Java 21 + Spring Boot 4.0.x + Tomcat + virtual threads form a coherent imperative stack
+- JSR 356 `@ServerEndpoint` runs on Tomcat's WebSocket subsystem — compatible with virtual thread executor
+- `java.net.http.WebSocket` is JDK-native, no library conflicts
+- Nimbus JOSE+JWT is a Spring Boot transitive dependency — zero new JARs added for JWT (ADR-11)
+- OTel Spring Boot Starter autoconfig (ADR-9) works with Spring Boot 4.x and Micrometer
+- `DefaultAzureCredential` via `azure-identity` is framework-agnostic — works in all 3 auth contexts
+- ConcurrentHashMap (ADR-10) aligns with virtual thread model — no pinning risk, lock-free reads
+- Resilience4j integrates with Spring Boot 4.x autoconfiguration and RestClient
+- ADRs 7–11 reinforce each other with no contradictions
+
+**Pattern Consistency: PASS**
+
+- Naming conventions (§4.1) consistent across all file tree entries and examples
+- Configuration prefix `sofia.*` used uniformly in all `@ConfigurationProperties` annotations and `application.yaml` examples
+- Note: The PRD Configuration Catalog uses `ivr.*` prefix (C-01 through C-60) as requirements-level identifiers. The architecture standardizes implementation on `sofia.*`. Mapping: PRD `ivr.acs.*` → code `sofia.acs.*`, PRD `ivr.voicelive.*` → code `sofia.voice-live.*`, etc. AI agents implementing stories should translate PRD C-xx references to `sofia.*` properties.
+- JSON format (camelCase), date format (ISO-8601 UTC), error shape (RFC 9457), and logging MDC keys (OTel dot-separated) are consistent throughout
+- Voice Live wire format pass-through rule (§4.3.4) aligns with sealed record modeling (§4.4.1)
+
+**Structure Alignment: PASS**
+
+- Project structure (~60 files, 7 feature packages) maps directly to architectural component diagram
+- Boundaries (4 inbound endpoints, 3 outbound integrations) match §5.4 exactly
+- Test directory mirrors source packages for package-private access
+- Integration test directory covers the 3 critical boundaries (webhook, WebSocket, tool call)
+
+### 6.2 Requirements Coverage Validation ✅
+
+**Functional Requirements (50 FRs across 10 Capabilities): COVERED**
+
+| FR Category | Architectural Coverage |
+|-------------|----------------------|
+| CAP-1 Call Handling (6 FRs) | `webhook/EventGridController` + `CallAutomationService` — answer, reject, callback handling |
+| CAP-2 Audio Streaming (6 FRs) | `websocket/AcsAudioEndpoint` + `bridge/AudioBridgeService` — PCM 24K bidirectional forwarding |
+| CAP-3 Voice AI Integration (6 FRs) | `bridge/VoiceLiveClient` + `VoiceLiveListener` + `VoiceLiveSessionInitializer` |
+| CAP-4 Session Management (5 FRs) | `model/CallSession` + `CallSessionStore` + CC-2 state machine |
+| CAP-5 Tool Call Framework (5 FRs) | `toolcall/ToolCallHandler` + `ToolCallDispatcher` + `ToolDefinitionRegistry` |
+| CAP-6 Security (5 FRs) | `config/JwtValidatorFactory` + `JwtValidator` + ADR-11 reference implementation |
+| CAP-7 Error Handling (5 FRs) | `exception/` sealed hierarchy + `GlobalExceptionHandler` + CC-4 degradation |
+| CAP-8 Observability (5 FRs) | `config/ObservabilityConfig` + OTel autoconfig (ADR-9) + §4.4.5 metric naming |
+| CAP-9 Configuration (5 FRs) | `config/*Properties` records + §4.1.3 prefix convention + §4.2.2 flat records |
+| CAP-10 Call Transfer (2 FRs) | Intentionally deferred to Growth phase — acknowledged, not a gap |
+
+**Non-Functional Requirements (47 NFRs): COVERED**
+
+- **Performance (10):** Virtual threads eliminate thread bottleneck (ADR-8); audio path purity (TC-17) ensures zero-overhead forwarding; eager VL connection (§4.5.1) reduces time-to-first-audio
+- **Reliability (8):** CC-4 degradation hierarchy; CC-6 deterministic resource cleanup; CC-7 correlated failure isolation; §4.5.4 graceful shutdown
+- **Security (10):** ADR-11 covers all 3 inbound auth paths with reference implementation; `DefaultAzureCredential` everywhere (TC-6); zero audio storage (TC-12); RFC 9457 error hardening (§4.3.3); admission control in `EventGridController`; rate limiting in `AcsHandshakeInterceptor`
+- **Scalability (6):** ConcurrentHashMap lock-free reads (ADR-10); virtual threads scale to 10K+ (ADR-8); container-portable (AP-4)
+- **Observability (8):** OTel autoconfig Day 1 (ADR-9); structured JSON logging via logstash-logback-encoder; 16 Micrometer metrics; 23 log events; 5 OTel spans; CC-1 correlation propagation
+- **Maintainability (5):** Config-driven prompts (AP-6); feature packages (§4.2.1); sealed types for exhaustive pattern matching
+
+**Security Requirements (18 SEC-REQs): COVERED**
+
+| Priority | SEC-REQs | Status |
+|----------|----------|--------|
+| P0 (10) | SEC-REQ-1, 2, 3, 4, 5, 9, 10, 11, 14, 15 | All have explicit architectural support |
+| P1 (8) | SEC-REQ-6, 7, 8, 12, 13, 16, 17, 18 | Acknowledged, intentionally deferred |
+
+**UX Requirements (11 UX-REQs): COVERED**
+
+All map to process patterns (§4.5) or cross-cutting concerns (CC-2, CC-4). Fallback prompts externalized as config (C-35 through C-39).
+
+**Acceptance Criteria (24 ACs): COVERED**
+
+All 24 acceptance criteria are testable with the defined test infrastructure (FakeAcsClient + FakeVoiceLiveServer + WireMock + integration tests).
+
+### 6.3 Implementation Readiness Validation ✅
+
+**Decision Completeness: HIGH**
+
+- All 10 decisions documented with versions, rationale, alternatives rejected, and "Accepted" statements
+- ADR-11 includes a **full reference implementation** (~100 lines) for the hardest auth problem (3 JWT validation paths)
+- ADR-10 includes capacity analysis with latency comparison (50ns vs 500µs–2ms)
+- All dependencies listed with sources and artifact names (including Resilience4j and logstash-logback-encoder)
+
+**Structure Completeness: HIGH**
+
+- ~60 files with per-file purpose comments in the directory tree
+- §5.1 maps FR categories to packages; §5.2 maps cross-cutting concerns to locations
+- §5.4 defines all 4 inbound and 3 outbound boundaries
+- §5.5 specifies config files, test organization, and tool definitions
+
+**Pattern Completeness: HIGH**
+
+- 9 pattern subsections covering naming, structure, format, communication, process, code quality
+- 8 mandatory rules (M-1 to M-8) with violation = PR rejection
+- 7 anti-patterns specific to this project
+- 11-item verification checklist
+- Admission control: `EventGridController` checks `CallSessionStore.size()` against `sofia.resilience.admission.max-calls` before calling `answerCall()`. Above threshold → answer briefly, play busy prompt, hangup (UX-REQ-11)
+- WebSocket rate limiting: `AcsHandshakeInterceptor` maintains a `ConcurrentHashMap<String, AtomicInteger>` of per-IP connection counts with TTL sweep. Exceeds `sofia.security.websocket.rate-limit-per-ip` → reject upgrade with HTTP 429
+
+### 6.4 Gap Analysis Results
+
+Six gaps were identified during validation. All were **alignment details**, not structural deficiencies. Resolutions applied:
+
+| # | Gap | Resolution |
+|---|-----|------------|
+| G-1 | Config prefix `sofia.*` (architecture) vs `ivr.*` (PRD) | **Kept `sofia.*`** as the implementation prefix. Documented the PRD→code mapping in §6.1 Pattern Consistency. AI agents translate PRD C-xx references to `sofia.*` properties. |
+| G-2 | Admission control had no architectural component | Added to `EventGridController` file-tree annotation and documented pattern in §6.3 |
+| G-3 | WebSocket per-IP rate limiting had no pattern | Added to `AcsHandshakeInterceptor` file-tree annotation and documented pattern in §6.3 |
+| G-4 | `CallState.java` file-tree comment listed wrong enum values | Updated to match CC-2: INITIALIZING, STREAMING, TERMINATING, TERMINATED |
+| G-5 | Resilience4j and logstash-logback-encoder missing from §2.4 | Added to dependency table |
+| G-6 | Tool definition filenames didn't match PRD's 3 tools | Updated to `get-user-data.json`, `send-invoice-registered-email.json`, `send-invoice-provided-email.json` |
+
+### 6.5 Architecture Completeness Checklist
+
+**✅ Requirements Analysis (Section 1)**
+
+- [x] Project context thoroughly analyzed — 50 FRs, 47 NFRs, 61 config params
+- [x] Scale and complexity assessed — 3 architectural tiers, PCM 24K audio path
+- [x] Technical constraints identified — 17 constraints (TC-1 to TC-17)
+- [x] Cross-cutting concerns mapped — 7 concerns (CC-1 to CC-7)
+
+**✅ Starter Template (Section 2)**
+
+- [x] Technology domain identified — Java backend service
+- [x] Starter selected with rationale — Initializr + ACS Sample reference
+- [x] All dependencies listed with sources and BOM ordering
+- [x] Initialization command provided
+
+**✅ Architectural Decisions (Section 3)**
+
+- [x] 10 critical decisions documented with versions
+- [x] 5 ADRs recorded (ADR-7 through ADR-11)
+- [x] Technology stack fully specified
+- [x] Integration patterns defined (WebSocket server + client, RestClient + APIM)
+- [x] Performance considerations addressed (audio path purity, eager connection, virtual threads)
+- [x] Reference implementation for highest-risk decision (ADR-11 JWT validation)
+
+**✅ Implementation Patterns (Section 4)**
+
+- [x] Naming conventions established (§4.1 — 4 subsections)
+- [x] Structure patterns defined (§4.2 — 5 subsections)
+- [x] Format patterns specified (§4.3 — 5 subsections)
+- [x] Communication patterns documented (§4.4 — 5 subsections)
+- [x] Process patterns complete (§4.5 — 6 subsections)
+- [x] Code quality rules defined (§4.6)
+- [x] Mandatory rules enumerated (§4.7 — M-1 to M-8)
+- [x] Anti-patterns catalogued (§4.8 — 7 items)
+- [x] Verification checklist ready (§4.9 — 11 items)
+
+**✅ Project Structure (Section 5)**
+
+- [x] Complete directory structure defined (~60 files)
+- [x] Component boundaries established (4 inbound, 3 outbound)
+- [x] Integration points mapped with data flow diagram
+- [x] Requirements-to-structure mapping complete (§5.1)
+- [x] Cross-cutting concern locations specified (§5.2)
+
+### 6.6 Architecture Readiness Assessment
+
+**Overall Status:** READY FOR IMPLEMENTATION
+
+**Confidence Level:** HIGH — all decisions validated, all requirements covered, all gaps resolved
+
+**Key Strengths:**
+
+1. **Audio path purity** — TC-17, CC-2, and tiering ensure the real-time audio path has zero business logic contamination
+2. **Reference implementation for hardest problem** — ADR-11 provides ~100 lines of production-ready JWT validation code covering all 3 inbound auth paths
+3. **Sealed type system** — InboundEvent/OutboundEvent sealed interfaces + IvrException sealed hierarchy give AI agents exhaustive pattern matching with compiler enforcement
+4. **Virtual thread alignment** — every decision (ConcurrentHashMap over Redis, ReentrantLock over synchronized, RestClient blocking calls) is designed for Project Loom
+5. **Mandatory rules as guardrails** — M-1 to M-8 prevent the most common mistakes before they enter the codebase
+6. **Comprehensive test infrastructure** — FakeAcsClient + FakeVoiceLiveServer + WireMock enable cloud-free testing from Day 1
+
+**Areas for Future Enhancement:**
+
+- K8s manifests (intentionally deferred — Decision 8)
+- Call transfer architecture (CAP-10, Growth phase)
+- PII masking implementation (SEC-REQ-6, P1)
+- KEDA autoscaling rules
+- Session resumption semantics for Voice Live reconnection
+
+### 6.7 PRD Configuration Prefix Mapping
+
+The PRD Configuration Catalog uses `ivr.*` prefix (C-01 through C-60). The architecture standardizes on `sofia.*` for implementation. Translation table for AI implementing agents:
+
+| PRD Prefix | Code Prefix | `@ConfigurationProperties` |
+|------------|------------|---------------------------|
+| `ivr.acs.*` | `sofia.acs.*` | `AcsProperties` |
+| `ivr.voicelive.*` | `sofia.voice-live.*` | `VoiceLiveProperties` |
+| `ivr.security.*` / `ivr.security.jwt.*` | `sofia.auth.*` | `AuthProperties` |
+| `ivr.resilience.*` | `sofia.resilience.*` | `ResilienceProperties` |
+| `ivr.call.*` | `sofia.call.*` | `CallProperties` |
+| `ivr.audio.*` | `sofia.audio.*` | `AudioProperties` |
+| `ivr.shutdown.*` | `sofia.shutdown.*` | `ShutdownProperties` |
+| `ivr.prompts.*` | `sofia.prompts.*` | `PromptsProperties` |
+| `ivr.tool-call.*` | `sofia.toolcall.*` | `ToolCallProperties` |
+| `ivr.websocket.*` | `sofia.websocket.*` | `WebSocketProperties` |
+| `management.*` | `management.*` | Spring Boot native (unchanged) |
+
+Metric names remain `ivr.*` (e.g., `ivr.call.duration`) — these are observability identifiers, not Spring config properties.
+
+### 6.8 Implementation Handoff
+
+**AI Agent Guidelines:**
+
+- Follow all architectural decisions exactly as documented in Sections 1–5
+- Use implementation patterns (Section 4) consistently across all components
+- Respect project structure and boundaries (Section 5)
+- Translate PRD `ivr.*` config references to `sofia.*` per §6.7
+- Refer to this document for all architectural questions
+- ADR-11 reference implementation is production-ready — use it as the starting point for JWT validation
+
+**First Implementation Step:**
+
+```bash
+curl https://start.spring.io/starter.zip \
+  -d type=maven-project \
+  -d language=java \
+  -d javaVersion=21 \
+  -d bootVersion=4.0.0 \
+  -d groupId=com.sofia \
+  -d artifactId=ivr-bridge \
+  -d name=sofia-ivr-bridge \
+  -d description="ACS Voice Live IVR Bridge Service" \
+  -d packageName=com.sofia.ivr \
+  -d dependencies=web,websocket,actuator,validation,configuration-processor \
+  -o ivr-bridge.zip
+```
+
+Then apply the package layout from §5.3 and configure `spring.threads.virtual.enabled=true`.
