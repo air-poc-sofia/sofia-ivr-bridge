@@ -230,7 +230,7 @@ A WireMock instance simulating the APIM gateway for tool call HTTP requests:
 
 Pre-recorded JSON fixtures for deterministic, repeatable tests:
 
-```
+```txt
 src/test/resources/fixtures/
 ├── acs/
 │   ├── audio-metadata.json            # AudioMetadata packet (stream config)
@@ -737,68 +737,7 @@ The lifecycle of a single call modeled as a finite state machine. Eliminates amb
 
 ### State Transition Diagram
 
-```
-                    IncomingCall
-                   (Event Grid)
-                        │
-                        ▼
-    ┌──────┐     ┌──────────┐     ┌───────────────┐
-    │ IDLE │────▶│ INCOMING │────▶│  ANSWERING    │
-    └──────┘     └──────────┘     └───────┬───────┘
-       ▲              │                    │
-       │         [reject/timeout]    answerCall success
-       │              │                    │
-       │              ▼                    ▼
-       │         ┌────────┐      ┌─────────────────┐
-       │         │ CLOSED │◀─┐   │ ACS_CONNECTED   │
-       │         └────────┘  │   │ (AudioMetadata)  │
-       │              ▲      │   └────────┬─────────┘
-       │              │      │            │
-       │         [any error] │    connect to Voice Live
-       │              │      │            │
-       │              │      │            ▼
-       │              │      │   ┌─────────────────┐
-       │              │      │   │ CONNECTING_VL   │
-       │              │      │   │ (comfort tone?)  │
-       │              │      │   └────────┬─────────┘
-       │              │      │            │
-       │              │      │    VL WebSocket open
-       │              │      │            │
-       │              │      │            ▼
-       │              │      │   ┌─────────────────┐
-       │              │      │   │ SESSION_SETUP   │
-       │              │      │   │ (session.update) │
-       │              │      │   └────────┬─────────┘
-       │              │      │            │
-       │              │      │    session.created
-       │              │      │            │
-       │              │      │            ▼
-       │              │      │   ┌─────────────────┐
-       │              │      ├───│    ACTIVE        │◀──────────┐
-       │              │      │   │ (audio bridging) │           │
-       │              │      │   └───┬─────┬────┬───┘           │
-       │              │      │       │     │    │               │
-       │              │      │  speech_ hangup/ max_dur    end of
-       │              │      │  started  drop   warning   barge-in
-       │              │      │       │     │    │               │
-       │              │      │       ▼     │    ▼               │
-       │              │      │  ┌────────┐ │ ┌──────────┐      │
-       │              │      │  │BARGE_IN│─┘ │ DRAINING │      │
-       │              │      │  └───┬────┘   └────┬─────┘      │
-       │              │      │      │              │            │
-       │              │      │      │         call ends         │
-       │              │      │      └──────────┐   │            │
-       │              │      │                 ▼   ▼            │
-       │              │      │            ┌──────────┐          │
-       │              │      └────────────│ CLOSING  │          │
-       │              │                   │(prompts?) │          │
-       │              │                   └─────┬────┘          │
-       │              │                         │               │
-       │              ▼                         ▼               │
-       │         ┌──────────┐                                   │
-       └─────────│  CLOSED  │     (BARGE_IN → ACTIVE on        │
-                 └──────────┘      new AI response start)───────┘
-```
+![Call State Machine — State Transition Diagram](../../docs/diagrams/prd-call-state-machine.png)
 
 ### Transition Table
 

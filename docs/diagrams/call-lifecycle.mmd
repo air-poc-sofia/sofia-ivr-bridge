@@ -1,0 +1,60 @@
+sequenceDiagram
+    participant EG as Event Grid
+    participant EGC as EventGridController
+    participant SDK as ACS SDK
+    participant ACS as ACS (WebSocket)
+    participant AAE as AcsAudioEndpoint
+    participant ABS as AudioBridgeService
+    participant VLC as VoiceLiveClient
+    participant VL as Voice Live API
+    participant VLL as VoiceLiveListener
+    participant TCH as ToolCallHandler
+    participant APIM as APIM
+
+    Note over EG, VL: Phase 1 — Incoming Call
+
+    EG->>EGC: IncomingCall event
+    EGC->>EGC: Validate JWT
+    EGC->>SDK: Answer call
+
+    Note over ACS, VLC: Phase 2 — WebSocket Setup
+
+    ACS->>AAE: Open WSS connection
+    AAE->>AAE: Validate JWT
+    AAE->>ABS: Create bridge
+
+    Note over ABS, VL: Phase 3 — Voice Live Connection
+
+    ABS->>VLC: Connect
+    VLC->>VL: Open WSS
+    VLC->>VL: session.update
+
+    Note over ACS, VL: Phase 4 — ACS Audio → Voice Live
+
+    ACS->>AAE: Audio frames (@OnMessage)
+    AAE->>VLC: InputAudioBufferAppend
+    VLC->>VL: Forward audio
+
+    Note over VL, AAE: Phase 5 — Voice Live Audio → ACS
+
+    VL->>VLL: Audio deltas
+    VLL->>ABS: Forward audio
+    ABS->>AAE: sendAudio()
+    AAE->>ACS: Audio frames
+
+    Note over VL, APIM: Phase 6 — Tool Calls
+
+    VL->>VLL: tool_call event
+    VLL->>TCH: Dispatch tool call
+    TCH->>APIM: Invoke backend
+    APIM-->>TCH: Response
+    TCH->>VLC: ToolResult
+    VLC->>VL: Send ToolResult
+
+    Note over ACS, VL: Phase 7 — Teardown
+
+    ACS-->>AAE: Disconnect
+    AAE->>ABS: Bridge teardown
+    ABS->>VLC: Close connection
+    VLC-->>VL: Close WSS
+    ABS->>ABS: Cleanup CallSession

@@ -1,0 +1,58 @@
+stateDiagram-v2
+    direction TB
+
+    [*] --> IDLE
+
+    IDLE --> INCOMING : T‑01 IncomingCall
+    IDLE --> CLOSING : T‑02 IncomingCall — admission rejects
+
+    INCOMING --> ANSWERING : T‑03 answerCall() succeeds
+    INCOMING --> CLOSED : T‑04 answerCall() fails
+    INCOMING --> CLOSED : T‑05 Ring timeout
+
+    ANSWERING --> ACS_CONNECTED : T‑06 ACS WebSocket + AudioMetadata
+    ANSWERING --> CLOSING : T‑07 Timeout — no WS in 5s
+
+    ACS_CONNECTED --> CONNECTING_VL : T‑08 VL handshake initiated
+    ACS_CONNECTED --> CLOSING : T‑09 Circuit breaker OPEN
+
+    CONNECTING_VL --> SESSION_SETUP : T‑11 VL WebSocket opens
+    CONNECTING_VL --> CLOSING : T‑12 Connect timeout
+
+    SESSION_SETUP --> ACTIVE : T‑13 session.created
+    SESSION_SETUP --> CLOSING : T‑14 Session rejection / error
+    SESSION_SETUP --> CLOSING : T‑15 Timeout — no session.created
+
+    ACTIVE --> BARGE_IN : T‑18 speech_started → StopAudio
+    ACTIVE --> CLOSING : T‑19 ACS WebSocket closes
+    ACTIVE --> CLOSING : T‑20 VL WebSocket closes unexpectedly
+    ACTIVE --> DRAINING : T‑21 Max duration warning
+    ACTIVE --> DRAINING : T‑23 SIGTERM received
+
+    BARGE_IN --> ACTIVE : T‑24 New response.audio.delta
+    BARGE_IN --> CLOSING : T‑26 ACS or VL closes
+
+    DRAINING --> CLOSING : T‑27 Final response.done
+    DRAINING --> CLOSING : T‑28 Drain timeout
+    DRAINING --> CLOSING : T‑29 Max duration hard limit
+
+    CLOSING --> CLOSED : T‑30 Both WS confirmed closed
+    CLOSING --> CLOSED : T‑31 Linked‑lifecycle timeout
+
+    CLOSED --> [*]
+
+    note right of IDLE : No call exists
+    note right of ACTIVE
+        Both connections live — audio bridging
+        Self‑transitions:
+        T‑16 AudioData → forward to VL
+        T‑17 response.audio.delta → forward to ACS
+        T‑22 First‑audio timeout → fallback greeting
+        T‑33 tool_call → dispatch to APIM gateway
+    end note
+    note right of BARGE_IN
+        StopAudio sent, old AI response cancelled
+        Caller audio flows to VL only
+        T‑25 Rapid speech_started — idempotent
+    end note
+    note left of CONNECTING_VL : T‑10 Comfort tone if delay exceeds C‑33

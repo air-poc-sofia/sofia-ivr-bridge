@@ -1,0 +1,44 @@
+flowchart LR
+    subgraph Inbound["Inbound Handling"]
+        EGC[EventGridController]
+        ACC[AcsCallbackController]
+    end
+
+    subgraph Session["Session Management"]
+        CSS[CallSessionStore]
+        CAS[CallAutomationService]
+    end
+
+    subgraph Audio["Audio Bridge"]
+        AAE[AcsAudioEndpoint]
+        ABS[AudioBridgeService]
+    end
+
+    subgraph VoiceLive["Voice Live Integration"]
+        VLC[VoiceLiveClient]
+        VLL[VoiceLiveListener]
+    end
+
+    subgraph Tools["Tool Execution"]
+        TCH[ToolCallHandler]
+        TCD[ToolCallDispatcher]
+    end
+
+    EGC -- "answer()" --> CAS
+    EGC -- "create()" --> CSS
+
+    AAE -- "get()" --> CSS
+    AAE -- "startBridge()" --> ABS
+
+    ABS -- "connect()" --> VLC
+    ABS -- "send(OutboundEvent)" --> VLC
+    ABS -- "sendAudio()" --> AAE
+
+    VLL -- "audio deltas" --> ABS
+    VLL -- "tool_call events" --> TCH
+
+    TCH -- "invoke()" --> TCD
+    TCH -- "send(ToolResult)" --> VLC
+
+    ACC -- "get()" --> CSS
+    ACC -- "teardown()" --> ABS

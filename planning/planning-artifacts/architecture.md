@@ -8,8 +8,6 @@ inputDocuments:
   - 'planning/planning-artifacts/prd.md'
   - 'URA - Architecture Q&A.md'
   - '.github/copilot-instructions.md'
-workflowType: 'architecture'
-project_name: 'agentic-ivr'
 user_name: 'Edu'
 date: '2025-07-23'
 elicitationMethods:
@@ -88,9 +86,9 @@ Per-call `CallContext` record holding `correlationId`, OTel span reference, `Ato
 
 Four behaviorally distinct states:
 
-```
-INITIALIZING → STREAMING → TERMINATING → TERMINATED
-```
+![Call State Machine](../../docs/diagrams/call-state-machine.png)
+
+_Source: [call-state-machine.mmd](../../docs/diagrams/call-state-machine.mmd)_
 
 Transitions governed by a **single `EnumMap<CallState, Set<CallState>>` transition table** — one point of audit, replaces scattered conditional logic. Invalid transition attempts are logged as errors and rejected (defensive programming).
 
@@ -1619,38 +1617,15 @@ sofia-ivr-bridge/
 
 #### 5.4.3 Internal Component Communication
 
-```
-EventGridController ──→ CallAutomationService.answer()
-                    ──→ CallSessionStore.create()
+![Internal Component Communication](../../docs/diagrams/component-communication.png)
 
-AcsAudioEndpoint ──→ CallSessionStore.get()
-                 ──→ AudioBridgeService.startBridge()
-
-AudioBridgeService ──→ VoiceLiveClient.connect()
-                   ──→ VoiceLiveClient.send(OutboundEvent)
-                   ──→ AcsAudioEndpoint.sendAudio()
-
-VoiceLiveListener ──→ AudioBridgeService (audio deltas)
-                  ──→ ToolCallHandler (tool_call events)
-
-ToolCallHandler ──→ ToolCallDispatcher.invoke()
-                ──→ VoiceLiveClient.send(ToolResult)
-
-AcsCallbackController ──→ CallSessionStore.get()
-                      ──→ AudioBridgeService.teardown() (on disconnect)
-```
+_Source: [component-communication.mmd](../../docs/diagrams/component-communication.mmd)_
 
 #### 5.4.4 Data Flow — Single Call Lifecycle
 
-```
-1. Event Grid → EventGridController → validate JWT → answer call via ACS SDK
-2. ACS opens WSS → AcsAudioEndpoint @OnOpen → validate JWT → create bridge
-3. Bridge → connect to Voice Live WSS → send session.update
-4. ACS audio frames → @OnMessage → VoiceLiveClient.send(InputAudioBufferAppend)
-5. Voice Live audio → VoiceLiveListener → AcsAudioEndpoint.sendAudio()
-6. Voice Live tool_call → ToolCallHandler → APIM → ToolResult → Voice Live
-7. Either side disconnects → bridge teardown → cleanup CallSession
-```
+![Call Lifecycle — Single Call Data Flow](../../docs/diagrams/call-lifecycle.png)
+
+_Source: [call-lifecycle.mmd](../../docs/diagrams/call-lifecycle.mmd)_
 
 ### 5.5 File Organization Patterns
 
