@@ -3,6 +3,11 @@ stepsCompleted: ['step-01-init', 'step-02-discovery', 'step-03-success', 'step-0
 inputDocuments: ['URA - Architecture Q&A.md', '.github/copilot-instructions.md', '.NET Reference Repo (CallAutomation_AzureAI_VoiceLive)']
 workflowType: 'prd'
 completedAt: '2026-02-15'
+lastEdited: '2026-02-16'
+editHistory:
+  - date: '2026-02-16'
+    workflow: 'edit-prd'
+    summary: 'Promoted Tool Call Framework from P1/Growth to P0/MVP. Added 3 tool calls (GET user data, send invoice to registered email, send invoice to user-provided email). Scope: IVR bridge → APIM gateway only. Auth: DefaultAzureCredential + managed identity. 41 changes across all sections: 4 new FRs (FR48-FR51), 2 new NFRs (NFR-P10, NFR-R14), 5 new config params (C-57 through C-60), 2 new ACs (AC-23, AC-24), 1 new state transition (T-33), 1 new security requirement (SEC-REQ-18), WireMock gateway stub in test infrastructure, Maria journey enriched with tool call round-trip, Day 2-3 sprint plan restructured.'
 documentCounts:
   briefs: 0
   research: 0
@@ -42,19 +47,19 @@ This product is a **conversational IVR service** that replaces traditional DTMF 
 This PRD was built iteratively through 10 discovery and specification steps. Sections appear in creation order rather than the canonical PRD reading order. Use this map for logical navigation:
 
 | Canonical Section | Location |
-|---|---|
+| --- | --- |
 | **Executive Summary** | *You are here* |
 | **Success Criteria** | [Success Criteria](#success-criteria) |
 | **Product Scope** (MVP + Growth) | [Product Scope](#product-scope) |
 | **User Journeys** (5 journeys, 4 personas) | [User Journeys](#user-journeys) |
-| **Functional Requirements** (46 FRs, 9 capabilities) | [Functional Requirements](#functional-requirements) |
-| **Non-Functional Requirements** (43 NFRs, 6 categories) | [Non-Functional Requirements](#non-functional-requirements) |
+| **Functional Requirements** (50 FRs, 10 capabilities) | [Functional Requirements](#functional-requirements) |
+| **Non-Functional Requirements** (47 NFRs, 6 categories) | [Non-Functional Requirements](#non-functional-requirements) |
 | **Architecture & Constraints** | [Architectural Principles](#architectural-principles--constraints-first-principles) |
-| **Security** (STRIDE + Attack Surface + 17 Requirements) | [STRIDE Threat Model](#stride-threat-model), [Security Requirements](#security-requirements) |
-| **Observability** (20 events, 14 metrics, 4 spans) | [Observability Requirements](#observability-requirements) |
-| **Configuration** (56 parameters, zero magic numbers) | [Configuration Catalog](#configuration-catalog) |
-| **Call State Machine** (12 states, 32 transitions) | [Call State Machine](#call-state-machine) |
-| **Sprint Plan** (5-day, 26 items) | [Scoping & MVP Strategy](#scoping--mvp-strategy) |
+| **Security** (STRIDE + Attack Surface + 18 Requirements) | [STRIDE Threat Model](#stride-threat-model), [Security Requirements](#security-requirements) |
+| **Observability** (23 events, 16 metrics, 5 spans) | [Observability Requirements](#observability-requirements) |
+| **Configuration** (61 parameters, zero magic numbers) | [Configuration Catalog](#configuration-catalog) |
+| **Call State Machine** (12 states, 33 transitions) | [Call State Machine](#call-state-machine) |
+| **Sprint Plan** (5-day, 30 items) | [Scoping & MVP Strategy](#scoping--mvp-strategy) |
 
 ---
 
@@ -102,7 +107,7 @@ This PRD was built iteratively through 10 discovery and specification steps. Sec
 ### Resilience Summary
 
 | ID | Failure Mode | Severity | Key Hardening |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | FM-1 | ACS WebSocket drop mid-call | **Critical** | Linked lifecycle, heartbeat, reconnection window |
 | FM-2 | Voice Live API unavailable | **Critical** | Circuit breaker, fallback prompts, health probe |
 | FM-3 | Pod termination during calls | **High** | Graceful drain, SIGTERM handler, rolling deploy |
@@ -123,9 +128,15 @@ The service is a **protocol translator and auth bridge** between ACS and Voice L
 
 The two concurrent WebSocket connections per call (ACS ↔ Service, Service ↔ Voice Live) are an **inherent architectural constraint**, not a design choice. ACS media streaming uses ACS-specific binary framing (`StreamingData.parse()`). Voice Live uses OpenAI Realtime-compatible JSON events. The service exists precisely to translate between these two protocols. Plan capacity around **2N connections for N concurrent calls**.
 
-### AP-3: APIM Is Out of Scope for MVP
+### AP-3: Thin API Gateway Integration for MVP
 
-Since MVP excludes tool calls to Oracle BRM / CRM backends, there are **no outbound backend API calls** and therefore no need for Azure API Management in V1. All APIM-related infrastructure, configuration, and code are deferred to V2 (tool call feature). This significantly reduces V1 infrastructure complexity.
+The MVP includes a **thin tool call framework** that routes Voice Live `tool_call` events to backend APIs via Azure API Management (APIM). The bridge service makes outbound HTTPS calls to APIM using **`java.net.http.HttpClient`** (JDK built-in, same module as the Voice Live WebSocket client) running on virtual threads — blocking `HttpClient.send()` is effectively non-blocking under Project Loom.
+
+The scope is deliberately narrow: 3 predefined tool calls (GET user data, send invoice to registered email, send invoice to user-provided email). The bridge handles tool call dispatch and result forwarding only — **no business logic** lives in the bridge. Backend API implementation behind APIM is out of scope.
+
+**Auth model:** `DefaultAzureCredential` acquires an OAuth2 bearer token scoped to the APIM audience (`C-57b`). APIM validates the token via `validate-jwt` inbound policy. No client secrets — managed identity in prod, `az login` locally.
+
+**Key constraint:** APIM infrastructure is pre-provisioned (same as ACS, Foundry, etc.). The bridge only needs the gateway base URL (`C-57`) and auth scope (`C-57b`).
 
 ### AP-4: Container-Portable Deployment
 
@@ -141,7 +152,7 @@ The project uses **Java 21 virtual threads with Spring MVC** (servlet stack + To
 - **Backpressure is unnecessary:** Real-time audio streams at a fixed, predictable rate (~48 KB/sec per direction for PCM 24K mono). This is bounded by physics (real-time speech), not by variable throughput. Reactive backpressure solves a problem this system doesn't have.
 - **Virtual threads eliminate the scalability concern:** Java 21 virtual threads handle hundreds of concurrent connections without thread exhaustion — the primary reason WebFlux was historically chosen for WebSocket workloads.
 - **Simpler programming model:** Imperative code is easier to write, debug, and maintain. No `Mono`/`Flux` operators, no reactive stack traces, no scheduler complexity.
-- **Future-proof for V2 tool calls:** Tool call handlers (V2) will make blocking HTTP requests to backend APIs. Virtual threads handle blocking calls naturally; WebFlux would require `WebClient` with reactive chains or blocking workarounds.
+- **Tool call HTTP calls on virtual threads:** Tool call handlers make blocking `java.net.http.HttpClient.send()` calls to APIM. Virtual threads handle these naturally — no `WebClient`, no reactive chains, no blocking workarounds. The same JDK module (`java.net.http`) provides both the WebSocket client (Voice Live) and the HTTP client (APIM gateway).
 
 **Stack:**
 
@@ -160,10 +171,10 @@ The bridge service should remain **thin and stateless**, designed to be graceful
 ### First Principles Summary
 
 | ID | Principle | Key Implication |
-|---|---|---|
+| --- | --- | --- |
 | AP-1 | Protocol translator, not audio processor | Zero audio buffering/inspection — forward bytes immediately |
 | AP-2 | Two-WebSocket model is inherent | Capacity planning: 2N connections for N calls |
-| AP-3 | No APIM in MVP | V1 infrastructure is simpler: ACS + Service + Voice Live + Key Vault only |
+| AP-3 | Thin API gateway integration for MVP | 3 tool calls routed via APIM; `java.net.http.HttpClient` on virtual threads; `DefaultAzureCredential` for gateway auth |
 | AP-4 | Container-portable | No K8s-specific code; deploy on AKS, ACA, or App Service |
 | AP-5 | Virtual Threads + Spring MVC over WebFlux | JSR 356 SDK compatibility, fixed-rate audio eliminates backpressure need, simpler model |
 | AP-6 | Designed for retirement | Keep bridge thin; no business logic accumulation |
@@ -196,12 +207,24 @@ A WebSocket client that pretends to be ACS, connecting to our `@ServerEndpoint`:
 A WebSocket server that pretends to be Voice Live, accepting our outbound connection:
 
 - Accepts outbound WSS connection from the service
-- Receives `session.update` → validates config, sends back `session.created`
+- Receives `session.update` → validates config (including tool definitions), sends back `session.created`
 - Receives `input_audio_buffer.append` → collects audio data
 - Sends `response.audio.delta` events (pre-recorded AI audio)
 - Sends `input_audio_buffer.speech_started` (barge-in simulation)
+- Sends `tool_call` events (tool call simulation — e.g., `get_user_data`, `send_invoice`)
+- Receives `tool_call_output` → validates tool call ID + response payload
 - **Fault injection:** configurable delay, disconnect, refuse connection (503 simulation), malformed events, slow responses
-- **Assertions:** verify what audio/events were received, verify session configuration
+- **Assertions:** verify what audio/events were received, verify session configuration, verify tool call outputs
+
+#### WireMock Gateway Stub
+
+A WireMock instance simulating the APIM gateway for tool call HTTP requests:
+
+- Responds to `POST /api/v1/users/{id}` (GET user data tool call)
+- Responds to `POST /api/v1/invoices/send` (send invoice tool calls)
+- **Fault injection:** configurable response delay (> C-58 for timeout testing), 4xx/5xx HTTP errors, connection refused
+- **Assertions:** verify request includes `Authorization: Bearer <token>` header, verify `correlationId` propagation
+- Runs on `http://localhost:8082` in `test` profile (matches C-57 test override)
 
 ### Test Fixture Library (P0)
 
@@ -220,11 +243,18 @@ src/test/resources/fixtures/
 │   ├── response-audio-greeting.json   # AI greeting (response.audio.delta)
 │   ├── speech-started.json            # Barge-in event
 │   ├── response-done.json             # response.done event
-│   └── tool-call-get-balance.json     # V2: tool_call event fixture
+│   ├── tool-call-get-user-data.json   # tool_call event: GET user data
+│   ├── tool-call-send-invoice.json    # tool_call event: send invoice
+│   └── tool-call-output-success.json  # Expected tool_call_output response
+├── gateway/
+│   ├── user-data-response.json        # APIM GET user data response
+│   └── send-invoice-response.json     # APIM send invoice response
 └── scenarios/
     ├── happy-path.yaml                # Full call: ACS sends → VL responds → ACS receives
     ├── barge-in.yaml                  # User interrupts AI mid-response
     ├── silence-timeout.yaml           # User says nothing, VAD fires
+    ├── tool-call-success.yaml         # AI triggers tool call → gateway responds → result returned
+    ├── tool-call-timeout.yaml         # AI triggers tool call → gateway timeout → error returned, call continues
     └── websocket-drop.yaml            # ACS disconnects mid-stream
 ```
 
@@ -235,7 +265,7 @@ Scenario files define scripted interaction sequences with expected outcomes. The
 ### Spring Profiles (P0)
 
 | Profile | ACS Source | Voice Live Source | Auth | Use Case |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | `test` | FakeAcsClient (in-process) | FakeVoiceLiveServer (in-process) | None | CI/CD, unit & integration tests |
 | `local` | Real ACS (via devtunnel) | Real Voice Live | `az login` / `DefaultAzureCredential` | Local dev with real services |
 | `prod` | Real ACS (direct) | Real Voice Live | Managed identity | Production deployment |
@@ -325,7 +355,7 @@ T+1.0s  New AI audio starts streaming to caller
 ### Caller Experience Summary
 
 | Phase | UX Requirements | Critical Metric |
-|-------|----------------|----------------|
+| ------- | ---------------- | ---------------- |
 | Ring → Answer | UX-REQ-1 (comfort tone) | Answer latency |
 | Setup → First Audio | UX-REQ-2 (proactive greeting), UX-REQ-3 (fallback), UX-REQ-4 (< 3s target) | `ivr.time_to_first_audio` |
 | Conversation | UX-REQ-5 (idempotent barge-in), UX-REQ-6 (externalized VAD), UX-REQ-7 (< 1s response) | `ivr.ai.response.latency` |
@@ -340,7 +370,7 @@ T+1.0s  New AI audio starts streaming to caller
 *Derived from QA analysis and Caller Journey Mapping during discovery.*
 
 | ID | Criteria | Test Method | Priority |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | **AC-1** | Call answered within 3 seconds of Event Grid delivery | Integration test (timing) + E2E monitoring | P0 |
 | **AC-2** | Audio round-trip forwarded correctly (byte-for-byte ACS → Voice Live and back) | Integration test (fixture comparison) | P0 |
 | **AC-3** | Barge-in: `StopAudio` sent to ACS within 100ms of `speech_started` event | Integration test (timing) | P0 |
@@ -363,6 +393,8 @@ T+1.0s  New AI audio starts streaming to caller
 | **AC-20** | HTTP 500 error response contains no stack trace, class names, or Spring-specific details | Integration test (trigger error + assert response body) | P0 |
 | **AC-21** | OWASP dependency-check passes with no Critical/High CVEs (CVSS ≥ 7) | CI pipeline verification | P1 |
 | **AC-22** | Production config contains no `connection-string` property — only `endpoint` + `DefaultAzureCredential` | Config validation + deployment test | P1 |
+| **AC-23** | Tool call round-trip: `tool_call` event → APIM gateway HTTP → `tool_call_output` returned to Voice Live within 5s (p95) | Integration test (WireMock gateway stub, timing assertion) | P0 |
+| **AC-24** | Tool call timeout: gateway does not respond within C-58 → error `tool_call_output` returned to Voice Live, call continues (no termination) | Integration test (WireMock delayed response > C-58) | P0 |
 
 ---
 
@@ -377,7 +409,7 @@ Observability is layered into three tiers: structured logging (P0), metrics (P1)
 All log events use structured JSON format via SLF4J + Logback. Every entry includes `correlationId`, `timestamp`, `level`, and `component`.
 
 | # | Log Event | Level | Component | Key Fields |
-|---|-----------|-------|-----------|------------|
+| --- | ----------- | ------- | ----------- | ------------ |
 | 1 | Incoming call received (Event Grid) | INFO | webhook | `correlationId`, `callerNumber`, `acsResourceId` |
 | 2 | Call answered | INFO | webhook | `correlationId`, `answerLatencyMs` |
 | 3 | ACS WebSocket connected | INFO | websocket-server | `correlationId`, `remoteAddr` |
@@ -398,13 +430,16 @@ All log events use structured JSON format via SLF4J + Logback. Every entry inclu
 | 18 | Event Grid replay rejected (stale event) | WARN | security | `eventTime`, `ageSeconds`, `maxAgeSeconds` |
 | 19 | ACS callback JWT validation failed | WARN | security | `remoteAddr`, `callId`, `reason` |
 | 20 | WebSocket rate limit exceeded | WARN | security | `remoteAddr`, `connectionCount`, `windowSeconds` |
+| 21 | Tool call dispatched | INFO | tool-call | `correlationId`, `toolName`, `gatewayUrl` |
+| 22 | Tool call succeeded | INFO | tool-call | `correlationId`, `toolName`, `latencyMs`, `httpStatus` |
+| 23 | Tool call failed | WARN | tool-call | `correlationId`, `toolName`, `latencyMs`, `httpStatus`, `errorType` |
 
 ### Metrics (P1)
 
 Exposed via **Micrometer** to Prometheus (or Azure Monitor via OpenTelemetry Collector). All metrics prefixed with `ivr.`.
 
 | # | Metric Name | Type | Description |
-|---|------------|------|-------------|
+| --- | ------------ | ------ | ------------- |
 | 1 | `ivr.calls.active` | Gauge | Current number of active calls (WebSocket pairs) |
 | 2 | `ivr.calls.total` | Counter | Total calls answered since startup |
 | 3 | `ivr.calls.rejected` | Counter | Calls rejected by admission control |
@@ -419,17 +454,20 @@ Exposed via **Micrometer** to Prometheus (or Azure Monitor via OpenTelemetry Col
 | 12 | `ivr.bargein.effectiveness` | Gauge | % of barge-ins where StopAudio arrives < 100ms (target: > 95%) |
 | 13 | `ivr.security.auth.rejected` | Counter | Rejected inbound connections/requests (tagged by reason: `jwt_invalid`, `jwt_expired`, `jwt_missing`, `replay`, `rate_limit`) |
 | 14 | `ivr.security.websocket.rate.limited` | Counter | WebSocket connection attempts rejected by per-IP rate limiter |
+| 15 | `ivr.tool_call.latency` | Timer | Tool call round-trip time: `tool_call` received → `tool_call_output` sent (p50, p95, p99) |
+| 16 | `ivr.tool_call.errors` | Counter | Tool call failures (tagged by `reason`: `timeout`, `http_4xx`, `http_5xx`, `connection_error`) |
 
 ### Distributed Tracing (P2)
 
 Spans emitted via **OpenTelemetry** SDK. Enable correlation from Event Grid → webhook → ACS WebSocket → Voice Live WebSocket.
 
 | # | Span Name | Parent | Key Attributes |
-|---|-----------|--------|----------------|
+| --- | ----------- | -------- | ---------------- |
 | 1 | `ivr.call` | (root) | `correlationId`, `callerNumber`, `callDurationMs` |
 | 2 | `ivr.call.answer` | `ivr.call` | `answerLatencyMs` |
 | 3 | `ivr.call.voicelive.connect` | `ivr.call` | `endpoint`, `connectLatencyMs`, `sessionId` |
 | 4 | `ivr.call.audio.bridge` | `ivr.call` | `packetsForwarded`, `bargeInCount` |
+| 5 | `ivr.call.tool_call` | `ivr.call` | `correlationId`, `toolName`, `latencyMs`, `httpStatus`, `success` |
 
 ---
 
@@ -442,26 +480,27 @@ Spans emitted via **OpenTelemetry** SDK. Enable correlation from Event Grid → 
 These are required for the system to function correctly and safely in production. No release without all P0 items passing. **Scope: 1 developer, Copilot-assisted, 5-day sprint.**
 
 | Area | Requirements |
-|------|-------------|
+| ------ | ------------- |
 | **Call Flow** | End-to-end: Event Grid → Answer → ACS WebSocket → Voice Live → audio round-trip → barge-in → hangup |
 | **Audio Bridge** | Bidirectional audio forwarding (AP-1), linked lifecycle (REQ-R1.1), PCM 24K mono passthrough |
 | **Caller Experience** | Comfort tone fallback (UX-REQ-1), proactive AI greeting (UX-REQ-2), silent deadlock prevention (UX-REQ-3), time-to-first-audio < 3s (UX-REQ-4), idempotent barge-in (UX-REQ-5), StopAudio priority (UX-REQ-8), admission-rejected callers hear busy prompt (UX-REQ-11), apology prompt on unexpected disconnect (UX-REQ-10) |
 | **Security** | WebSocket JWT validation (SEC-REQ-1), Event Grid Entra ID validation (SEC-REQ-2), ACS callback JWT validation (SEC-REQ-3), non-guessable callback URLs (SEC-REQ-4), zero audio storage (SEC-REQ-5), actuator lockdown (SEC-REQ-9), error response hardening (SEC-REQ-10), ACS managed identity — no connection strings (SEC-REQ-11), Event Grid replay protection (SEC-REQ-14), WebSocket per-IP rate limiting (SEC-REQ-15), OWASP dependency-check in CI (SEC-REQ-16), wss:// only, `DefaultAzureCredential` everywhere, zero hardcoded secrets |
 | **Resilience** | Admission control (REQ-R4.1, R4.4), graceful shutdown / drain (REQ-R3.1–R3.2) |
-| **Observability** | All 20 log events with `correlationId` + structured JSON logging, all 14 Micrometer metrics (auto-config Day 1, custom metrics incremental), health/readiness probes |
+| **Observability** | All 23 log events with `correlationId` + structured JSON logging, all 16 Micrometer metrics (auto-config Day 1, custom metrics incremental), health/readiness probes, 5 OTel spans |
 | **Config** | Externalized config via Spring profiles (`test` / `local` / `prod`), system prompt loaded from external file (C-12) |
-| **Test Infrastructure** | FakeAcsClient + FakeVoiceLiveServer + fixture library + `test` profile |
+| **Test Infrastructure** | FakeAcsClient + FakeVoiceLiveServer + fixture library + WireMock (gateway stub) + `test` profile |
 | **CI/CD** | PR pipeline: `./mvnw test` (cloud-free) + OWASP dependency-check (fail CVSS ≥ 7) |
 | **Deployment** | Container image, health/readiness probes, production deploy on Day 5 |
-| **Acceptance Criteria** | AC-1 through AC-4, AC-9 (time-to-first-audio), AC-10 (idempotent barge-in), AC-11 (fallback prompt), AC-12 (busy prompt), AC-13 (apology prompt), AC-15 (WebSocket JWT), AC-16 (replay protection), AC-17 (no audio in logs), AC-19 (actuator lockdown), AC-20 (error hardening), AC-21 (OWASP), AC-22 (no connection strings) |
+| **Acceptance Criteria** | AC-1 through AC-4, AC-9 (time-to-first-audio), AC-10 (idempotent barge-in), AC-11 (fallback prompt), AC-12 (busy prompt), AC-13 (apology prompt), AC-15 (WebSocket JWT), AC-16 (replay protection), AC-17 (no audio in logs), AC-19 (actuator lockdown), AC-20 (error hardening), AC-21 (OWASP), AC-22 (no connection strings), AC-23 (tool call round-trip), AC-24 (tool call timeout) |
 | **Dev Experience** | Developer setup guide, `./mvnw test` works with zero cloud credentials |
+| **Tool Call Framework** | 3 tool calls (GET user data, send invoice registered email, send invoice provided email) via APIM gateway; `java.net.http.HttpClient` on virtual threads; `DefaultAzureCredential` → APIM `validate-jwt`; tool definitions file (C-60); WireMock in tests |
 
 ### P1 — Growth (Post-MVP, Incremental)
 
 Enhancements delivered after the 5-day MVP is in production. Prioritized by risk reduction and operational maturity.
 
 | Area | Requirements |
-|------|-------------|
+| ------ | ------------- |
 | **Security** | PII masking in logs (SEC-REQ-6), Voice Live managed identity + key disable (SEC-REQ-12), abuse monitoring opt-out (SEC-REQ-13), system prompt guardrails (SEC-REQ-17) |
 | **Security Compliance** | Data residency — Brazil South (SEC-REQ-7), LGPD data processing record (SEC-REQ-8) |
 | **Resilience** | Circuit breaker (REQ-R2.1–R2.4), heartbeat/keepalive (REQ-R1.2) |
@@ -476,7 +515,7 @@ Enhancements delivered after the 5-day MVP is in production. Prioritized by risk
 Enhancements for operational maturity and future growth.
 
 | Area | Requirements |
-|------|-------------|
+| ------ | ------------- |
 | **Resilience** | Reconnection window (REQ-R1.3–R1.4), health probes for Voice Live (REQ-R2.4 advanced), dead-letter queue (REQ-R5.2), extended ring timeout (REQ-R5.3), redundant Event Grid (REQ-R5.4) |
 | **Caller Experience** | Graceful max-duration wrap-up (UX-REQ-9), AI response latency metric (UX-REQ-7) |
 | **Tracing** | OpenTelemetry distributed tracing (4 spans, see Observability) |
@@ -491,16 +530,17 @@ Enhancements for operational maturity and future growth.
 *Capacity planning baselines per deployment tier.*
 
 | Tier | Concurrent Calls | Instances | WebSocket Connections | Memory (per instance) | Notes |
-|------|------------------|-----------|----------------------|----------------------|-------|
-| **MVP** | 50 | 1 | 100 (2 per call) | 1 GB | Sufficient for dev, QA, pilot |
+| ------ | ------------------ | ----------- | ---------------------- | ---------------------- | ------- |
+| **MVP** | 50 | 1 | 100 (2 per call) + APIM HTTP pool | 1 GB | WS connections + HttpClient connection pool for tool calls (bounded by C-59) |
 | **Growth** | 200 | 2–3 | 400–600 | 1 GB each | First production rollout |
 | **Scale** | 1,000+ | 10+ | 2,000+ | 1 GB each | Full production, requires autoscaling |
 
 **Key sizing assumptions:**
 
-- Each call = 2 WebSocket connections + ~100 KB memory (buffers, session state)
+- Each call = 2 WebSocket connections + ~100 KB memory (buffers, session state) + shared APIM HTTP connection pool
 - Audio rate: ~48 KB/sec per direction (PCM 24K, 16-bit mono) → ~96 KB/sec total per call
 - Network bandwidth per instance at 50 calls: ~4.8 MB/sec (well within container limits)
+- Tool call HTTP requests are short-lived (< 5s) and bounded by C-59 max concurrent per call
 - Virtual threads eliminate thread-count bottleneck — JVM can handle 10K+ virtual threads easily
 - Primary scaling constraint is **WebSocket connection count per instance** and **memory for connection state**, not CPU
 
@@ -514,7 +554,7 @@ A task is considered **Done** when ALL of the following are satisfied:
 
 1. **Code complete** — Implementation matches the task requirements and follows project conventions (AP-1 through AP-6)
 2. **Unit tests pass** — All new code has unit tests; `./mvnw test` passes with zero failures
-3. **Integration tests pass** — New behavior has integration tests using FakeAcsClient / FakeVoiceLiveServer; `./mvnw test -Pintegration` passes
+3. **Integration tests pass** — New behavior has integration tests using FakeAcsClient / FakeVoiceLiveServer / WireMock gateway stub; `./mvnw test -Pintegration` passes
 4. **No regressions** — Full test suite passes; no previously-passing tests are broken
 5. **Structured logging** — All new code paths emit structured log events with `correlationId` (per Observability section)
 6. **Documentation updated** — Relevant docs (README, developer guide, API docs) are updated if behavior changes
@@ -532,7 +572,7 @@ Every configurable parameter in the system. Zero magic numbers in code — all v
 ### Webhook Controller
 
 | ID | Property | Type | Default | Per-Env | Validation | Ref |
-|---|----------|------|---------|---------|------------|-----|
+| --- | ---------- | ------ | --------- | --------- | ------------ | ----- |
 | C-01 | `ivr.acs.callback-base-url` | String | — | **Required** | Valid URL | — |
 | C-02 | `ivr.acs.endpoint` | String | — | **Required** | Valid URL | SEC-REQ-11 |
 | C-03 | `ivr.acs.ring-timeout-seconds` | int | `45` | Optional | 15–120 | REQ-R5.3 |
@@ -540,7 +580,7 @@ Every configurable parameter in the system. Zero magic numbers in code — all v
 ### ACS WebSocket Server (JSR 356)
 
 | ID | Property | Type | Default | Per-Env | Validation | Ref |
-|---|----------|------|---------|---------|------------|-----|
+| --- | ---------- | ------ | --------- | --------- | ------------ | ----- |
 | C-04 | `ivr.websocket.server.path` | String | `/ws` | Rarely | Starts with `/` | — |
 | C-05 | `ivr.websocket.server.idle-timeout-ms` | long | `5000` | Optional | 1000–30000 | REQ-R1.2 |
 | C-06 | `ivr.websocket.server.max-message-size` | int | `65536` | Optional | 1024–1048576 | — |
@@ -548,7 +588,7 @@ Every configurable parameter in the system. Zero magic numbers in code — all v
 ### Voice Live WebSocket Client
 
 | ID | Property | Type | Default | Per-Env | Validation | Ref |
-|---|----------|------|---------|---------|------------|-----|
+| --- | ---------- | ------ | --------- | --------- | ------------ | ----- |
 | C-07 | `ivr.voicelive.endpoint` | String | — | **Required** | Valid WSS URL | — |
 | C-08 | `ivr.voicelive.api-version` | String | `2025-05-01-preview` | Optional | Non-blank | — |
 | C-09 | `ivr.voicelive.model` | String | — | **Required** | Non-blank | — |
@@ -558,7 +598,7 @@ Every configurable parameter in the system. Zero magic numbers in code — all v
 ### Voice Live Session Configuration
 
 | ID | Property | Type | Default | Per-Env | Validation | Ref |
-|---|----------|------|---------|---------|------------|-----|
+| --- | ---------- | ------ | --------- | --------- | ------------ | ----- |
 | C-12 | `ivr.voicelive.system-prompt` | String | — | **Required** | Non-blank | — |
 | C-13 | `ivr.voicelive.voice` | String | `en-US-Aria:DragonHDLatestNeural` | Optional | Valid voice ID | — |
 | C-14 | `ivr.voicelive.vad.type` | String | `semantic` | Optional | `semantic` or `server` | UX-REQ-6 |
@@ -570,7 +610,7 @@ Every configurable parameter in the system. Zero magic numbers in code — all v
 ### Audio Bridge
 
 | ID | Property | Type | Default | Per-Env | Validation | Ref |
-|---|----------|------|---------|---------|------------|-----|
+| --- | ---------- | ------ | --------- | --------- | ------------ | ----- |
 | C-19 | `ivr.audio.format` | String | `pcm_24k_mono` | Immutable | Fixed | AP-1 |
 | C-20 | `ivr.audio.sample-rate` | int | `24000` | Immutable | Fixed | AP-1 |
 | C-21 | `ivr.audio.silence-packet-threshold` | int | `10` | Optional | 1–100 | — |
@@ -578,7 +618,7 @@ Every configurable parameter in the system. Zero magic numbers in code — all v
 ### Resilience
 
 | ID | Property | Type | Default | Per-Env | Validation | Ref |
-|---|----------|------|---------|---------|------------|-----|
+| --- | ---------- | ------ | --------- | --------- | ------------ | ----- |
 | C-22 | `ivr.resilience.circuit-breaker.failure-threshold` | int | `3` | Optional | 1–20 | REQ-R2.1 |
 | C-23 | `ivr.resilience.circuit-breaker.half-open-delay-ms` | long | `30000` | Optional | 5000–300000 | REQ-R2.1 |
 | C-24 | `ivr.resilience.circuit-breaker.success-threshold` | int | `1` | Optional | 1–5 | REQ-R2.1 |
@@ -590,7 +630,7 @@ Every configurable parameter in the system. Zero magic numbers in code — all v
 ### Call Lifecycle
 
 | ID | Property | Type | Default | Per-Env | Validation | Ref |
-|---|----------|------|---------|---------|------------|-----|
+| --- | ---------- | ------ | --------- | --------- | ------------ | ----- |
 | C-29 | `ivr.call.max-duration-seconds` | int | `600` | Optional | 60–3600 | REQ-R3.5 |
 | C-30 | `ivr.call.max-duration-warning-seconds` | int | `30` | Optional | 10–120 | UX-REQ-9 |
 | C-31 | `ivr.call.linked-lifecycle-timeout-ms` | long | `3000` | Optional | 1000–10000 | REQ-R1.1 |
@@ -600,13 +640,13 @@ Every configurable parameter in the system. Zero magic numbers in code — all v
 ### Graceful Shutdown
 
 | ID | Property | Type | Default | Per-Env | Validation | Ref |
-|---|----------|------|---------|---------|------------|-----|
+| --- | ---------- | ------ | --------- | --------- | ------------ | ----- |
 | C-34 | `ivr.shutdown.drain-timeout-seconds` | int | `90` | Optional | 30–300 | REQ-R3.1 |
 
 ### Fallback Prompts
 
 | ID | Property | Type | Default | Per-Env | Validation | Ref |
-|---|----------|------|---------|---------|------------|-----|
+| --- | ---------- | ------ | --------- | --------- | ------------ | ----- |
 | C-35 | `ivr.prompts.comfort-tone-file` | String | `classpath:prompts/comfort-tone.wav` | Optional | Valid resource | UX-REQ-1 |
 | C-36 | `ivr.prompts.fallback-greeting-file` | String | `classpath:prompts/fallback-greeting.wav` | Optional | Valid resource | UX-REQ-3 |
 | C-37 | `ivr.prompts.error-apology-file` | String | `classpath:prompts/error-apology.wav` | Optional | Valid resource | UX-REQ-10 |
@@ -616,7 +656,7 @@ Every configurable parameter in the system. Zero magic numbers in code — all v
 ### Security
 
 | ID | Property | Type | Default | Per-Env | Validation | Ref |
-|---|----------|------|---------|---------|------------|-----|
+| --- | ---------- | ------ | --------- | --------- | ------------ | ----- |
 | C-40 | `ivr.security.jwt.enabled` | boolean | `true` | Optional | — | SEC-REQ-1 |
 | C-41 | `ivr.security.jwt.issuer` | String | — | Required when enabled | Valid URL | SEC-REQ-1 |
 | C-42 | `ivr.security.jwt.audience` | String | — | Required when enabled | Non-blank | SEC-REQ-1 |
@@ -632,7 +672,7 @@ Every configurable parameter in the system. Zero magic numbers in code — all v
 ### Profile Override Matrix
 
 | Property | `test` | `local` | `prod` |
-|----------|--------|---------|--------|
+| ---------- | -------- | --------- | -------- |
 | C-01 callback-base-url | `http://localhost:8080` | `https://<devtunnel>.devtunnels.ms` | `https://ivr.example.com` |
 | C-02 acs.endpoint | `http://localhost:8080` | `https://<acs>.communication.azure.com` | `https://<acs>.communication.azure.com` |
 | C-07 voicelive.endpoint | `ws://localhost:9090` | `wss://<foundry>.../realtime` | `wss://<foundry>.../realtime` |
@@ -643,11 +683,13 @@ Every configurable parameter in the system. Zero magic numbers in code — all v
 | C-45 event-grid.max-event-age-seconds | `300` | `300` | `300` |
 | C-46 websocket.rate-limit-per-ip | `100` | `100` | `10` |
 | C-48 management.server.port | `8080` (same) | `8081` | `8081` |
+| C-57 tool-call.gateway-base-url | `http://localhost:8082` (WireMock) | `https://<apim>.azure-api.net` | `https://<apim>.azure-api.net` |
+| C-57b tool-call.gateway-auth-scope | (not used — WireMock) | `api://<apim-app-id>/.default` | `api://<apim-app-id>/.default` |
 
 ### API Backend Lifecycle (from Pre-mortem & First Principles — Step 7)
 
 | ID | Property | Type | Default | Per-Env | Validation | Ref | Priority |
-|----|-----------|------|---------|---------|------------|-----|----------|
+| ---- | ----------- | ------ | --------- | --------- | ------------ | ----- | ---------- |
 | C-51 | `ivr.voicelive.session-init-timeout-ms` | long | `5000` | Optional | 500–15000 | Pre-mortem #1 | P0 |
 | C-52 | `ivr.call.orphan-reaper-interval-ms` | long | `60000` | test: `1000` | 1000–300000 | Pre-mortem #2 | P0 |
 | C-53 | `ivr.call.allowed-numbers-pattern` | String | `.*` (all) | Optional | Valid regex | Red Team #1 | **P1** |
@@ -657,7 +699,17 @@ Every configurable parameter in the system. Zero magic numbers in code — all v
 
 **P1 configs** are wired in code but **not enforced** in MVP. Default values ensure they are inert (`.*` matches all callers). This avoids test coverage confusion — P1 configs have explicit priority tags.
 
-**Total: 56 configurable parameters** across 11 components — zero magic numbers in code.
+### Tool Call Framework
+
+| ID | Property | Type | Default | Per-Env | Validation | Ref | Priority |
+| ---- | ----------- | ------ | --------- | --------- | ------------ | ----- | ---------- |
+| C-57 | `ivr.tool-call.gateway-base-url` | String | — | **Required** | Valid HTTPS URL | AP-3, FR48 | P0 |
+| C-57b | `ivr.tool-call.gateway-auth-scope` | String | — | **Required** | Non-blank (Entra ID audience URI) | SEC-REQ-18, FR48 | P0 |
+| C-58 | `ivr.tool-call.response-timeout-ms` | long | `5000` | Optional | 1000–30000 | FR50, AC-23 | P0 |
+| C-59 | `ivr.tool-call.max-concurrent` | int | `3` | Optional | 1–10 | FR50 | P0 |
+| C-60 | `ivr.tool-call.definitions-file` | String | `classpath:tool-definitions.json` | Optional | Valid resource path, valid JSON | FR51, FR13 | P0 |
+
+**Total: 61 configurable parameters** across 12 components — zero magic numbers in code.
 
 ---
 
@@ -670,7 +722,7 @@ The lifecycle of a single call modeled as a finite state machine. Eliminates amb
 ### States
 
 | State | Description | Active Connections | Audio Flowing? |
-|-------|-------------|-------------------|----------------|
+| ------- | ------------- | ------------------- | ---------------- |
 | **IDLE** | No call exists (initial/terminal) | None | No |
 | **INCOMING** | Event Grid `IncomingCall` received, not yet answered | None | No |
 | **ANSWERING** | `answerCall()` invoked, waiting for media WebSocket | None (HTTP in progress) | No |
@@ -751,7 +803,7 @@ The lifecycle of a single call modeled as a finite state machine. Eliminates amb
 ### Transition Table
 
 | # | From | Event / Trigger | Guard | To | Actions |
-|---|------|----------------|-------|----|---------|
+| --- | ------ | ---------------- | ------- | ---- | --------- |
 | T-01 | IDLE | `IncomingCall` | Admission allows | INCOMING | Log #1, start answer timer |
 | T-02 | IDLE | `IncomingCall` | Admission rejects | CLOSING | Answer, play busy prompt (UX-REQ-11), hangup |
 | T-03 | INCOMING | `answerCall()` succeeds | — | ANSWERING | Log #2, register callback |
@@ -775,6 +827,7 @@ The lifecycle of a single call modeled as a finite state machine. Eliminates amb
 | T-21 | ACTIVE | Max duration warning (C-29 − C-30) | — | DRAINING | Inject wrap-up to VL (UX-REQ-9) |
 | T-22 | ACTIVE | First-audio timeout (C-32) | No audio received yet | *(self)* | Play fallback greeting (UX-REQ-3), log WARN |
 | T-23 | ACTIVE | SIGTERM received | — | DRAINING | Send "one moment" to VL (REQ-R3.2) |
+| T-33 | ACTIVE | `tool_call` from VL | — | *(self)* | Dispatch HTTPS to APIM gateway (FR48), return `tool_call_output` (FR49), log #21/#22/#23. Audio bridge continues uninterrupted. |
 | T-24 | BARGE_IN | New `response.audio.delta` | — | ACTIVE | Resume audio bridging VL → ACS |
 | T-25 | BARGE_IN | `speech_started` again (rapid) | — | *(self)* | Idempotent StopAudio (UX-REQ-5) |
 | T-26 | BARGE_IN | ACS or VL closes | — | CLOSING | Same as T-19/T-20 |
@@ -790,7 +843,7 @@ The lifecycle of a single call modeled as a finite state machine. Eliminates amb
 If any of these occur, log `ERROR` and force-transition to CLOSING:
 
 | From | Invalid Event | Why |
-|------|--------------|-----|
+| ------ | -------------- | ----- |
 | IDLE | Audio data | No call exists |
 | INCOMING | Audio data | WebSocket not yet established |
 | ANSWERING | `session.created` | Voice Live not yet contacted |
@@ -808,7 +861,7 @@ If any of these occur, log `ERROR` and force-transition to CLOSING:
 ### State × Configuration Cross-Reference
 
 | State | Key Config Properties |
-|-------|----------------------|
+| ------- | ---------------------- |
 | INCOMING | C-03 (ring timeout), C-26/C-27 (admission) |
 | ANSWERING | C-01 (callback URL) |
 | ACS_CONNECTED | C-04 (ws path), C-05/C-06 (ws config) |
@@ -827,18 +880,18 @@ If any of these occur, log `ERROR` and force-transition to CLOSING:
 ### Trust Boundaries Analyzed
 
 | # | Boundary | From → To |
-|---|----------|-----------|
+| --- | ---------- | ----------- |
 | TB-1 | Internet → ACS Platform | Caller PSTN/SIP → Azure Communication Services |
 | TB-2 | ACS Platform → IVR Service | Event Grid webhooks, mid-call callbacks, WebSocket audio |
 | TB-3 | IVR Service → Voice Live API | Outbound WSS to Azure AI Foundry |
 | TB-4 | IVR Service → Key Vault | Secret retrieval at startup |
-| TB-5 | IVR Service → APIM → Backends | Outbound HTTPS to Oracle BRM, CRM, etc. (future — tool calls) |
+| TB-5 | IVR Service → APIM → Backends | Outbound HTTPS to Oracle BRM, CRM, etc. via API gateway (MVP — 3 tool calls) |
 | TB-6 | Container Platform → IVR Service | Health probes, management endpoints |
 
 ### Findings
 
 | ID | Trust Boundary | STRIDE Category | Threat | Severity | Mitigation | Status |
-|----|---------------|-----------------|--------|----------|------------|--------|
+| ---- | --------------- | ----------------- | -------- | ---------- | ------------ | -------- |
 | S-1 | TB-2 (ACS→IVR) | **Spoofing** | WebSocket upgrade request without JWT — anyone who discovers WS URL can connect and receive/inject audio | **CRITICAL** | JWT validation MUST be P0, not P1. Validate `Authorization` header *during handshake* before upgrading. Use ACS OIDC metadata for key rotation. | **P0 → SEC-REQ-1** |
 | S-2 | TB-2 (ACS→IVR) | **Information Disclosure** | Audio bytes logged at DEBUG/TRACE level would expose caller voice data (biometric PII under LGPD) | HIGH | Never log audio payload content. Log only metadata (size, sequence). Zero-storage guarantee. | P0 → SEC-REQ-5 |
 | S-3 | TB-2 (ACS→IVR) | **Information Disclosure** | Phone numbers logged in full expose caller identity | MEDIUM | Mask all phone numbers to last 4 digits in every log appender. Use structured logging with a PII-masking filter. | P0 → SEC-REQ-6 |
@@ -852,7 +905,7 @@ If any of these occur, log `ERROR` and force-transition to CLOSING:
 ### LGPD Impact Assessment (Simple Items — In Scope)
 
 | # | LGPD Requirement | Implementation | Complexity |
-|---|-----------------|----------------|------------|
+| --- | ----------------- | ---------------- | ------------ |
 | 1 | Zero audio storage guarantee | Audio is forwarded in real-time; no buffer persisted to disk or storage. `tmpdir` is ephemeral container memory only. | Simple ✅ |
 | 2 | PII masking in logs | Structured logging with phone-number masking filter (last 4 digits only). No caller name in logs. | Simple ✅ |
 | 3 | Data residency — Brazil South | All Azure resources deployed in `brazilsouth` region. No cross-region replication for V1. | Simple ✅ |
@@ -869,7 +922,7 @@ If any of these occur, log `ERROR` and force-transition to CLOSING:
 ### Entry Points (Inbound)
 
 | ID | Surface | Protocol | Path | Auth Mechanism | Data Sensitivity | Threat Level |
-|----|---------|----------|------|----------------|-----------------|--------------|
+| ---- | --------- | ---------- | ------ | ---------------- | ----------------- | -------------- |
 | EP-1 | Event Grid Webhook | HTTPS POST | `/api/events` | Entra ID bearer token (validated via Event Grid SDK) | Low (event metadata: callId, from, to phone numbers) | Medium |
 | EP-2 | ACS Mid-Call Callbacks | HTTPS POST | `/api/callbacks/{callId}?token={random}` | Signed JWT in `Authorization` header | Medium (call state transitions, callId) | Medium |
 | EP-3 | ACS WebSocket Audio | WSS | `/ws` | JWT in `Authorization` header during upgrade | **Critical** (raw PCM audio — biometric data) | **High** ⚠️ |
@@ -879,15 +932,16 @@ If any of these occur, log `ERROR` and force-transition to CLOSING:
 ### Outbound Connections
 
 | ID | Target | Protocol | Auth | Data Sensitivity |
-|----|--------|----------|------|-----------------|
+| ---- | -------- | ---------- | ------ | ----------------- |
 | OC-1 | Voice Live API | WSS (Private Endpoint) | `DefaultAzureCredential` → `Cognitive Services User` RBAC | Critical (audio + AI session) |
 | OC-2 | ACS Call Automation API | HTTPS | `DefaultAzureCredential` → ACS RBAC | Medium (call control commands) |
 | OC-3 | Key Vault | HTTPS (Private Endpoint) | Managed Identity | High (secrets retrieval — GET only) |
+| OC-4 | APIM API Gateway | HTTPS | `DefaultAzureCredential` → Entra ID bearer token (scope C-57b) | Medium (tool call request/response: user data, invoice operations) |
 
 ### Data Sensitivity Inventory
 
 | Data Type | Classification | Where It Flows | Storage | LGPD Category |
-|-----------|---------------|----------------|---------|---------------|
+| ----------- | --------------- | ---------------- | --------- | --------------- |
 | Raw PCM Audio | **Critical / Biometric** | ACS→IVR→Voice Live (real-time) | **Zero** — forwarded in memory only | Sensitive Personal Data (Art. 5-II) |
 | Phone Numbers | **PII** | Event Grid events, callback URLs, logs | Masked in logs (last 4 digits) | Personal Data (Art. 5-I) |
 | Call IDs | Internal Identifier | All components (correlation) | In-memory + logs | Non-personal (system-generated UUID) |
@@ -897,12 +951,12 @@ If any of these occur, log `ERROR` and force-transition to CLOSING:
 ### Gaps Found
 
 | ID | Gap | Severity | Remediation | New Requirement |
-|----|-----|----------|-------------|-----------------|
+| ---- | ----- | ---------- | ------------- | ----------------- |
 | AS-1 | Spring Boot Actuator endpoints not addressed in any PRD section — `/actuator/env` can expose all config including secrets | **Critical** | Bind actuator to separate management port (8081). Expose only `/health` and `/ready` on management port. Disable all other actuator endpoints. | SEC-REQ-9 |
 | AS-2 | Error responses may contain stack traces, class names, Spring internal details | High | Configure `server.error.include-stacktrace=never`, custom error handler returns generic JSON | SEC-REQ-10 |
 | AS-3 | ACS connection string stored in Key Vault is itself a secret that could be leaked | High | **Eliminated** — use `DefaultAzureCredential` with `ivr.acs.endpoint` (non-secret URL). No connection string anywhere. | SEC-REQ-11 |
 | AS-4 | Voice Live API key could be used as fallback auth | Medium | Disable API key access on Foundry resource. Force managed identity only. | SEC-REQ-12 |
-| AS-5 | No rate limiting on WebSocket connections — single IP could exhaust connection pool | Medium | Per-IP rate limiter on WebSocket handshake endpoint. Default: 10 connections per 60 seconds. | SEC-REQ-15 |
+| AS-5 | No rate limiting on WebSocket connections — single IP could exhaust connection pool. Gateway HTTP connection pool not bounded. | Medium | Per-IP rate limiter on WebSocket handshake endpoint. Default: 10 connections per 60 seconds. `java.net.http.HttpClient` connection pool bounded by C-59 max concurrent tool calls. | SEC-REQ-15 |
 | AS-6 | No mechanism to detect or prevent prompt injection in system prompt or user audio | Medium | System prompt guardrails + Azure AI Content Safety integration for abuse detection. | SEC-REQ-17 |
 | AS-7 | Dependency vulnerabilities not checked in CI pipeline | Medium | Add OWASP dependency-check + container image scan to PR pipeline. | SEC-REQ-16 |
 
@@ -910,12 +964,12 @@ If any of these occur, log `ERROR` and force-transition to CLOSING:
 
 ## Security Requirements
 
-*Synthesized from STRIDE Threat Model (S-1 through S-9) + Attack Surface Mapping (AS-1 through AS-7). Total: 17 security requirements.*
+*Synthesized from STRIDE Threat Model (S-1 through S-9) + Attack Surface Mapping (AS-1 through AS-7). Total: 18 security requirements.*
 
 ### P0 — Must Have for MVP
 
 | ID | Requirement | Source | Acceptance Criteria | Config |
-|----|------------|--------|---------------------|--------|
+| ---- | ------------ | -------- | --------------------- | -------- |
 | SEC-REQ-1 | **WebSocket JWT Validation** — Validate JWT in `Authorization` header during WebSocket upgrade handshake. Reject with HTTP 401 before upgrading if invalid/expired/missing. Use ACS OIDC metadata endpoint for key rotation. | S-1 | AC-15 | C-40, C-41, C-42, C-44 |
 | SEC-REQ-2 | **Event Grid Entra ID Validation** — Validate bearer token on `/api/events` using Event Grid SDK. | S-5 | (existing AC-5) | C-43 |
 | SEC-REQ-3 | **ACS Callback JWT Validation** — Validate signed JWT on all mid-call callback requests. | S-4 | (existing AC-6) | C-40 |
@@ -930,7 +984,7 @@ If any of these occur, log `ERROR` and force-transition to CLOSING:
 ### P1 — Important, Post-MVP OK
 
 | ID | Requirement | Source | Acceptance Criteria | Config |
-|----|------------|--------|---------------------|--------|
+| ---- | ------------ | -------- | --------------------- | -------- |
 | SEC-REQ-7 | **Data Residency** — All Azure resources deployed in `brazilsouth` region. No cross-region replication for V1. | LGPD | — | — |
 | SEC-REQ-8 | **LGPD Data Processing Record** — Maintain Art. 37 record documenting what personal data is processed, purpose, retention (zero), and access controls. | LGPD | — | — |
 | SEC-REQ-12 | **Voice Live Managed Identity + Key Disable** — Authenticate to Voice Live API using `DefaultAzureCredential`. Disable API key access on the Foundry resource to prevent key-based auth fallback. | AS-4 | — | — |
@@ -938,11 +992,12 @@ If any of these occur, log `ERROR` and force-transition to CLOSING:
 | SEC-REQ-15 | **WebSocket Rate Limiting** — Per-IP rate limiter on WebSocket handshake endpoint. Default: 10 connections per 60 seconds. Configurable. | AS-5 | — | C-46, C-47 |
 | SEC-REQ-16 | **Dependency Vulnerability Scanning** — OWASP dependency-check in PR pipeline (fail on CVSS ≥ 7). Container image scanning (Trivy or Grype) for Critical/High CVEs. | AS-7, S-6 | AC-21 | — |
 | SEC-REQ-17 | **System Prompt Guardrails** — System prompt includes explicit instructions to refuse off-topic requests and never reveal internal system details. Azure AI Content Safety integration for abuse detection. | AS-6 | — | C-12 |
+| SEC-REQ-18 | **Gateway Auth Scope Validation** — Tool call HTTP requests to the APIM gateway SHALL authenticate using `DefaultAzureCredential` with the configured Entra ID scope (C-57b). The acquired bearer token SHALL be sent in the `Authorization` header. If token acquisition fails, the tool call SHALL fail gracefully (FR50 error path) rather than sending an unauthenticated request. | TB-5, OC-4 | AC-23 | C-57b |
 
 ### Security × Config Cross-Reference
 
 | SEC-REQ | Config Properties |
-|---------|-------------------|
+| --------- | ------------------- |
 | SEC-REQ-1 | C-40 (jwt.enabled), C-41 (jwt.issuer), C-42 (jwt.audience), C-44 (acs-oidc-metadata-url) |
 | SEC-REQ-2 | C-43 (event-grid.validation-enabled) |
 | SEC-REQ-4 | C-50 (callback-token-length) |
@@ -951,11 +1006,12 @@ If any of these occur, log `ERROR` and force-transition to CLOSING:
 | SEC-REQ-11 | C-02 (acs.endpoint) |
 | SEC-REQ-14 | C-45 (max-event-age-seconds) |
 | SEC-REQ-15 | C-46 (rate-limit-per-ip), C-47 (rate-limit-window-seconds) |
+| SEC-REQ-18 | C-57b (gateway-auth-scope) |
 
 ### Security Decision Log
 
 | Decision | Rationale |
-|----------|-----------|
+| ---------- | ----------- |
 | **No WAF or Azure Firewall for V1** | All inbound is from known Microsoft IP ranges (ACS, Event Grid). WAF breaks Event Grid validation headers and can't handle binary WebSocket framing. Azure Firewall costs ~$1K/mo with minimal benefit. NSGs for IP allowlisting are sufficient. |
 | **No ACS Connection String** | Both connection string and `DefaultAzureCredential` require Azure connectivity — no offline benefit. Eliminating the connection string removes a secret from Key Vault and simplifies rotation. `DefaultAzureCredential` works everywhere: managed identity in prod, `az login` locally. |
 | **JWT validation is P0, not P1** | Without JWT on WebSocket, anyone who discovers the URL can connect and receive live caller audio (biometric PII). This is the highest-impact security gap in the entire system. |
@@ -980,14 +1036,14 @@ If any of these occur, log `ERROR` and force-transition to CLOSING:
 - Call completion rate **≥ 99%** (calls that are answered reach a graceful end)
 - **Zero audio data at rest** — audio forwarded in real-time through memory only
 - All P0 security requirements pass validation (JWT, replay protection, rate limiting, actuator lockdown, error hardening)
-- Full integration test suite runs **without Azure credentials** (FakeAcsClient + FakeVoiceLiveServer)
+- Full integration test suite runs **without Azure credentials** (FakeAcsClient + FakeVoiceLiveServer + WireMock gateway stub)
 - OWASP dependency-check passes (no CVSS ≥ 7)
 - Single `./mvnw clean package` produces a deployable artifact
 - Micrometer metrics (auto-config + custom) + structured JSON logging from Day 1
 
 ### Business Success (Accelerator)
 
-- **Day 3 milestone:** First real phone call through ACS reaches AI and gets a spoken response (placeholder system prompt OK)
+- **Day 3 milestone:** First real phone call through ACS reaches AI and gets a spoken response — tool call round-trip with APIM gateway proven (placeholder system prompt OK)
 - **Day 5 milestone:** Sustained production traffic with real callers, all security hardened, production system prompt deployed
 - **Clone-to-first-call < 30 minutes** — developer experience for onboarding new deployers
 - System prompt is the **only per-client customization** — loaded from external config (C-12), authored by domain specialists (not the dev)
@@ -995,12 +1051,13 @@ If any of these occur, log `ERROR` and force-transition to CLOSING:
 ### Measurable Outcomes
 
 | Metric | Target | Measurement |
-|--------|--------|-------------|
+| -------- | -------- | ------------- |
 | Time-to-first-audio | < 2 seconds | From `CallConnected` event to first audio byte sent to ACS |
 | Barge-in latency | < 100ms | From `speech_started` event to `StopAudio` sent to ACS |
 | Call completion rate | ≥ 99% | Calls answered / calls reaching graceful end |
 | Concurrent calls | 50 per instance | Load test with simulated audio streams |
 | Cloud-free test suite | 100% pass | `./mvnw test` with no Azure credentials configured |
+| Tool call round-trip | < 5 seconds (p95) | From `tool_call` event received to `tool_call_output` sent back to Voice Live |
 | Auth rejection accuracy | 100% | Invalid/expired/missing JWT → 401, connection never upgrades |
 
 ---
@@ -1020,6 +1077,17 @@ If any of these occur, log `ERROR` and force-transition to CLOSING:
 - Barge-in support (`speech_started` → `StopAudio`)
 - Graceful error handling with fallback audio prompts (busy, apology, timeout)
 
+**Tool Call Framework (3 predefined tool calls via APIM):**
+
+- Voice Live sends `tool_call` events → bridge dispatches HTTPS request to APIM gateway (`C-57`)
+- `java.net.http.HttpClient` on virtual threads — blocking `.send()` is effectively non-blocking
+- Auth: `DefaultAzureCredential` acquires bearer token scoped to APIM audience (`C-57b`)
+- Response timeout per tool call (`C-58`, default 10s); call stays ACTIVE during tool execution
+- Tool call result forwarded back to Voice Live as `tool_call_output` event
+- 3 tool calls: (1) GET user data, (2) send invoice to registered email, (3) send invoice to user-provided email
+- WireMock stub server in test profile for gateway simulation
+- Tool definitions file (`C-60`) loaded at session init — externalized, not hardcoded
+
 **Security (all in-scope for 5 days):**
 
 - JWT validation on WebSocket handshake + ACS callbacks (SEC-REQ-1, 3)
@@ -1037,7 +1105,7 @@ If any of these occur, log `ERROR` and force-transition to CLOSING:
 
 - Micrometer auto-config on Day 1, custom metrics added incrementally per feature
 - Structured JSON logging (Logback + JSON encoder)
-- All 20 log events defined in Observability Requirements
+- All 23 log events defined in Observability Requirements
 - All 14 metrics defined in Observability Requirements
 - Health + readiness probes via Actuator
 
@@ -1048,14 +1116,14 @@ If any of these occur, log `ERROR` and force-transition to CLOSING:
 - Call admission control (reject when at capacity)
 - Graceful shutdown (drain active calls before termination)
 
-**Day-by-Day Plan:** See the [Authoritative Day-by-Day Sprint Plan](#scoping--mvp-strategy) in the Scoping section for the detailed 26-item breakdown with per-day traceability.
+**Day-by-Day Plan:** See the [Authoritative Day-by-Day Sprint Plan](#scoping--mvp-strategy) in the Scoping section for the detailed 30-item breakdown with per-day traceability.
 
 **Key Constraint:** Day 3 milestone uses a placeholder system prompt. Production prompt (authored by domain specialists) swapped in via config property `C-12` on Day 5 deploy.
 
 ### Growth — Post-MVP
 
 - PII masking in logs (SEC-REQ-6) — custom Logback filter with phone-number regex
-- Tool call framework — connect to Oracle BRM, CRM, etc. via APIM
+- Extended tool calls — additional Oracle BRM, CRM operations beyond initial 3 via APIM
 - Multi-language support (voice + system prompt per locale)
 - Call transfer to human agent (warm/cold)
 - LGPD full compliance — consent for AI processing (Art. 11), DPA with Azure AI
@@ -1070,7 +1138,7 @@ If any of these occur, log `ERROR` and force-transition to CLOSING:
 
 ## User Journeys
 
-*Derived from Step 4 — User Journey Mapping + Critique & Refine elicitation. 5 journeys covering 4 user types, exercising 20 of 22 acceptance criteria.*
+*Derived from Step 4 — User Journey Mapping + Critique & Refine elicitation. 5 journeys covering 4 user types, exercising 22 of 24 acceptance criteria.*
 
 ### Journey 1: Maria — The Caller (Happy Path)
 
@@ -1082,7 +1150,9 @@ Meanwhile, the service opens a WebSocket to Voice Live (T-08 → T-11). The conn
 
 **At T+1.8 seconds from answer**, the AI greeting begins streaming. Maria hears: *"Olá! Bem-vinda à [empresa]. Como posso te ajudar?"* The `ivr.time_to_first_audio` metric records **1.8 seconds** — well under the 3-second target (UX-REQ-4, AC-9).
 
-Maria says: *"Quero saber o saldo da minha fatura."* The audio flows through the bridge — `AudioData` packets forwarded to Voice Live as `input_audio_buffer.append` (T-16). Voice Live's semantic VAD detects end of speech. Within **600ms**, the AI responds with her balance information. The `ivr.ai.response.latency` metric ticks at 0.6 seconds (UX-REQ-7).
+Maria says: *"Quero saber o saldo da minha fatura."* The audio flows through the bridge — `AudioData` packets forwarded to Voice Live as `input_audio_buffer.append` (T-16). Voice Live's semantic VAD detects end of speech.
+
+**Now the tool call round-trip (T-33):** Voice Live determines it needs Maria's account data to answer. It fires a `tool_call` event — function `get_user_data`, argument `{"phone": "+5511999887766"}`. The bridge receives the event, dispatches an HTTPS request to the APIM gateway (FR48) using `DefaultAzureCredential` for auth (SEC-REQ-18, C-57b). WireMock (in test) or the real APIM gateway (in prod) responds with Maria's account JSON in **1.2 seconds** — well under the 5-second timeout (C-58, NFR-P10). The bridge wraps the response as `tool_call_output` and sends it back to Voice Live (FR49). The `ivr.tool_call.latency` timer records 1.2s. Within **600ms** of receiving the tool output, the AI responds with her balance information. The `ivr.ai.response.latency` metric ticks at 0.6 seconds (UX-REQ-7).
 
 Then the AI starts explaining late payment options. Maria already knows — she **interrupts mid-sentence**: *"Não, já sei disso. Quero pagar agora."*
 
@@ -1090,9 +1160,9 @@ Voice Live detects her speech (T-18) and fires `speech_started`. **Within 80ms**
 
 **Now the critical round-trip (T-24):** Voice Live processes Maria's interruption and generates a new response. The first `response.audio.delta` arrives — the state transitions BARGE_IN → ACTIVE (T-24). The AI says: *"Claro! Vou gerar o código de pagamento agora."* Maria hears the direct response to what she actually asked, not a continuation of the previous topic. The conversation flows naturally — she interrupted, was heard, and got a relevant answer.
 
-Maria gets her payment code, says *"Obrigada!"*, and hangs up. The ACS WebSocket closes (T-19), triggering linked lifecycle — Voice Live connection closes within 3 seconds (C-31). State: CLOSING → CLOSED (T-30). Total call: **25 seconds**. Log event #14 records: `totalDurationMs=25000, audioPacketsForwarded=1200, bargeInCount=1`.
+Maria gets her payment code, says *"Obrigada!"*, and hangs up. The ACS WebSocket closes (T-19), triggering linked lifecycle — Voice Live connection closes within 3 seconds (C-31). State: CLOSING → CLOSED (T-30). Total call: **25 seconds**. Log event #14 records: `totalDurationMs=25000, audioPacketsForwarded=1200, bargeInCount=1, toolCallCount=1`.
 
-**Requirements exercised:** AC-1, AC-2, AC-3, AC-9, AC-10, UX-REQ-1–5, UX-REQ-8, T-01 through T-19, T-24, T-30 | **Config touched:** C-01, C-02, C-07, C-09, C-12–C-18, C-29, C-31, C-33
+**Requirements exercised:** AC-1, AC-2, AC-3, AC-9, AC-10, AC-23, UX-REQ-1–5, UX-REQ-8, T-01 through T-19, T-24, T-30, T-33 | **Config touched:** C-01, C-02, C-07, C-09, C-12–C-18, C-29, C-31, C-33, C-57, C-57b, C-58
 
 ---
 
@@ -1253,15 +1323,15 @@ In the terminal, structured JSON log events #1 through #14 scroll past. He sees 
 
 **Clone to first real call: 22 minutes.** Exactly what the Success Criteria promised.
 
-**Requirements exercised:** Developer setup guide, Spring profiles (test/local), FakeAcsClient, FakeVoiceLiveServer, AC-17 (no audio in logs), AC-19 (actuator lockdown), all 20 log events, DefaultAzureCredential (SEC-REQ-11) | **Config:** C-01, C-02, C-07, C-40, C-48
+**Requirements exercised:** Developer setup guide, Spring profiles (test/local), FakeAcsClient, FakeVoiceLiveServer, WireMock gateway stub, AC-17 (no audio in logs), AC-19 (actuator lockdown), all 23 log events, DefaultAzureCredential (SEC-REQ-11) | **Config:** C-01, C-02, C-07, C-40, C-48, C-57, C-57b
 
 ---
 
 ### Journey Requirements Summary
 
 | Journey | User Type | Key Capabilities Demonstrated | AC Coverage |
-|---------|-----------|-------------------------------|-------------|
-| 1: Maria (Happy) | Caller | End-to-end audio, barge-in round-trip (BARGE_IN→ACTIVE), time-to-first-audio, comfort tone timing | AC-1, AC-2, AC-3, AC-9, AC-10 |
+| --------- | ----------- | ------------------------------- | ------------- |
+| 1: Maria (Happy) | Caller | End-to-end audio, barge-in round-trip (BARGE_IN→ACTIVE), tool call round-trip (T-33), time-to-first-audio, comfort tone timing | AC-1, AC-2, AC-3, AC-9, AC-10, AC-23 |
 | 2A: Carlos (Admission) | Caller | Admission control, busy prompt | AC-7, AC-12 |
 | 2B: Carlos (VL Failure) | Caller | Linked lifecycle, circuit breaker, apology prompt | AC-4, AC-5, AC-13 |
 | 2C: Carlos (Max Duration) | Caller | DRAINING state, natural wrap-up, graceful max-duration | AC-14 |
@@ -1270,14 +1340,14 @@ In the terminal, structured JSON log events #1 through #14 scroll past. He sees 
 | 4: Thiago (Specialist) | Domain | Config-only deploy, system prompt iteration, feedback loop | C-12, AP-6 |
 | 5: Lucas (Dev) | Developer | Zero-config tests, clone-to-call < 30m, test profile, local profile, no audio in logs | AC-17, AC-19 |
 
-**AC coverage: 20 of 22** — AC-18 (PII masking) and AC-22 (no connection strings) are verified programmatically in CI/deployment, not through user journeys.
+**AC coverage: 22 of 24** — AC-18 (PII masking) and AC-22 (no connection strings) are verified programmatically in CI/deployment, not through user journeys.
 
 ## API Backend Specific Requirements
 
 ### Endpoint Specification (MVP)
 
 | Endpoint | Method | Protocol | Auth | Purpose |
-|----------|--------|----------|------|---------|
+| ---------- | -------- | ---------- | ------ | --------- |
 | `/api/v1/events` | POST | HTTPS | Entra ID bearer token (Event Grid) | Incoming call notifications + subscription validation |
 | `/api/v1/callbacks/{callId}` | POST | HTTPS | Signed JWT (ACS) | Mid-call event callbacks (call connected, disconnected, etc.) |
 | `/ws/v1` | GET → WSS upgrade | WSS | JWT in handshake headers | Bidirectional audio stream (ACS ↔ Service) |
@@ -1298,7 +1368,7 @@ In the terminal, structured JSON log events #1 through #14 scroll past. He sees 
 Already fully specified in Security Requirements (SEC-REQ-1 through SEC-REQ-17). Summary by endpoint:
 
 | Endpoint | Auth Mechanism | Validation |
-|----------|---------------|------------|
+| ---------- | --------------- | ------------ |
 | `/api/v1/events` | Entra ID bearer token | SEC-REQ-2: Validate issuer, audience, signature |
 | `/api/v1/callbacks/{callId}` | ACS-signed JWT in headers | SEC-REQ-3: Validate signature; SEC-REQ-4: `{callId}` is non-guessable UUID (defense-in-depth — acts as shared secret between ACS and service) |
 | `/ws/v1` | JWT in auth header on upgrade | SEC-REQ-1: Validate before upgrade; SEC-REQ-15: Rate limit connections |
@@ -1308,7 +1378,7 @@ Already fully specified in Security Requirements (SEC-REQ-1 through SEC-REQ-17).
 ### Data Schemas
 
 | Data Flow | Format | Schema |
-|-----------|--------|--------|
+| ----------- | -------- | -------- |
 | Event Grid → `/api/v1/events` | JSON | `EventGridEvent[]` — **batched array**; each event processed concurrently. **Critical:** return HTTP 200 even if individual events fail — failed events logged, individual calls not answered. Never let one bad event poison the batch (Event Grid retries the *entire* batch on 5xx) |
 | Event Grid subscription validation | JSON | `SubscriptionValidationEventData` → respond with `validationResponse` |
 | ACS → `/api/v1/callbacks/{callId}` | JSON | `CloudEvent[]` — `CallConnected`, `CallDisconnected`, `PlayFailed`, etc. |
@@ -1327,7 +1397,7 @@ Already fully specified in Security Requirements (SEC-REQ-1 through SEC-REQ-17).
 ### Error Codes & Responses
 
 | Scenario | HTTP Status | Response Body | Action |
-|----------|-------------|---------------|--------|
+| ---------- | ------------- | --------------- | -------- |
 | Invalid Event Grid token | 401 | `{"error": "unauthorized"}` | Reject, log SEC event |
 | Invalid callback JWT | 401 | `{"error": "unauthorized"}` | Reject, log SEC event |
 | Replayed callback (dup `jti` or expired `iat`) | 401 | `{"error": "unauthorized"}` | Reject; cache processed `jti` claims for JWT lifetime + 60s buffer |
@@ -1345,7 +1415,7 @@ Already fully specified in Security Requirements (SEC-REQ-1 through SEC-REQ-17).
 ### Rate Limiting Strategy
 
 | Layer | Mechanism | Rationale |
-|-------|-----------|-----------|
+| ------- | ----------- | ----------- |
 | **WebSocket connections** | SEC-REQ-15: Connection rate limiting per source IP | Prevent WS flood |
 | **HTTP callbacks** (`/api/v1/callbacks`) | **Trust ACS** + Caffeine cache deduplication (key: `callId` + `eventType` + `correlationId`, `expireAfterWrite` TTL) | ACS controls callback frequency; dedup catches retries/bugs without full rate limiting. Use Caffeine (already in Spring Boot starter) — not a custom data structure |
 | **Event Grid** (`/api/v1/events`) | **Trust Event Grid** — built-in retry with exponential backoff | Event Grid self-throttles; 429 would cause unnecessary retries |
@@ -1354,7 +1424,7 @@ Already fully specified in Security Requirements (SEC-REQ-1 through SEC-REQ-17).
 ### Resilience & Lifecycle
 
 | Concern | Mechanism | Config |
-|---------|-----------|--------|
+| --------- | ----------- | -------- |
 | **Voice Live session init timeout** | If `session.created` not received within timeout → disconnect caller gracefully, log `VL_SESSION_TIMEOUT` | `C-51: ivr.voicelive.session-init-timeout-ms` (default 5000) |
 | **Orphan session reaper** | Periodic sweep terminates sessions older than max-call-duration + buffer. Catches calls where neither WS close nor callback arrived | `C-52: ivr.call.orphan-reaper-interval-ms` (default 60000; test: 1000). 60s is proportional to typical call durations — 30s was too aggressive (60 sweeps per 30-min call) |
 | **Dual cleanup path** | Call state cleaned up on *either* WS close *or* callback, whichever arrives first. Cleanup is idempotent — safe to trigger from both | — |
@@ -1365,7 +1435,7 @@ Already fully specified in Security Requirements (SEC-REQ-1 through SEC-REQ-17).
 ### API Versioning
 
 | Decision | Value | Rationale |
-|----------|-------|-----------|
+| ---------- | ------- | ----------- |
 | **Strategy** | URL prefix: `/api/v1/` for HTTP, `/ws/v1` for WebSocket | Blue-green deployment safety — in-flight calls on old version survive while new calls route to new version |
 | **Scope** | Both HTTP endpoints and WebSocket path | WS path versioned because audio framing/schema changes during deployment would break in-flight calls |
 | **Breaking changes** | Increment to `/api/v2/`, `/ws/v2` | Standard practice; V1 stays running during migration |
@@ -1381,7 +1451,7 @@ Already fully specified in Security Requirements (SEC-REQ-1 through SEC-REQ-17).
 ### API Documentation (MVP)
 
 | Artifact | Scope | Timeline |
-|----------|-------|----------|
+| ---------- | ------- | ---------- |
 | OpenAPI 3.0 spec | `/api/v1/events`, `/api/v1/callbacks/{callId}` | Day 1 (scaffold) |
 | WebSocket protocol doc | `/ws/v1` message formats, lifecycle, audio translation pipeline | Day 2 (with audio protocol translator) |
 | Deployment verification | Post-deploy smoke test validates Event Grid subscription URL matches service endpoint; zero-traffic canary alert (`ivr.calls.incoming.total` = 0 for 5 min → alert) | Day 5 |
@@ -1401,17 +1471,18 @@ Already fully specified in Security Requirements (SEC-REQ-1 through SEC-REQ-17).
 This MVP targets a **specific, measurable caller pain point**: callers who currently endure hold queues or rigid DTMF menus will get natural-language voice interaction within 30 seconds of dialing. The narrowest slice that proves the concept:
 
 - One phone number → one ACS resource → one Voice Live session → one caller conversation.
-- No tool calls, no backend integrations, no multi-language support.
-- The AI agent **listens, understands, and responds** using only its system prompt knowledge base.
+- Three tool calls (GET user data, send invoice to registered email, send invoice to user-provided email) routed through APIM to backend APIs.
+- No multi-language support.
+- The AI agent **listens, understands, and responds** using its system prompt knowledge base, and **executes actions** via tool calls when the conversation requires it.
 
 **Team:** 1 developer + GitHub Copilot. Azure resources (ACS, Foundry, AKS, Key Vault, APIM) are pre-provisioned. System prompt authored by domain specialists — consumed as config, not coded.
 
-**Scope boundary principle:** If a capability doesn't directly contribute to a caller hearing an AI voice response within 30 seconds, it's not P0.
+**Scope boundary principle:** If a capability doesn't directly contribute to a caller hearing an AI voice response within 30 seconds or executing one of the 3 defined tool calls, it's not P0.
 
 ### P0 — Must-Have (5-Day Sprint)
 
 | # | Capability | Day | Trace |
-|---|-----------|-----|-------|
+| --- | ----------- | ----- | ------- |
 | 1 | Spring Boot 4.x scaffold + health probes (startup, liveness, readiness) | 1 | AP-1 |
 | 2 | Event Grid webhook: receive `IncomingCall`, validate JWT, answer call | 1 | SEC-REQ-1, SEC-REQ-2 |
 | 3 | ACS mid-call callback handler (CallConnected, CallDisconnected, PlayFailed) | 1 | REQ-R1.1 |
@@ -1438,6 +1509,10 @@ This MVP targets a **specific, measurable caller pain point**: callers who curre
 | 24 | Structured JSON logging with correlation ID propagation | 4 | OBS |
 | 25 | Unit + integration tests (≥80% line coverage on bridge + lifecycle code) | 5 | DoD (see Definition of Done section) |
 | 26 | AKS deployment manifests + smoke test | 5 | DoD (see Definition of Done section) |
+| 27 | Tool call handler: receive `tool_call` from Voice Live, dispatch HTTPS to APIM, return `tool_call_output` | 2–3 | AP-3, FR48–FR51 |
+| 28 | `DefaultAzureCredential` for APIM gateway auth (OAuth2 bearer token, scope C-57b) | 2 | SEC-REQ-18, C-57b |
+| 29 | Tool definitions file loaded at session init (C-60) — externalized, not hardcoded | 2 | C-60, FR13 |
+| 30 | WireMock gateway stub in test profile + tool call integration tests | 3–5 | AC-23, AC-24 |
 
 *\* Item 13 (reconnection window): Day 3 stretch goal / Day 4 fallback. First real call milestone (item 16) does not depend on it.*
 
@@ -1456,7 +1531,9 @@ The application reads standard environment variables (`AZURE_CLIENT_ID`, `ACS_EN
 
 ### Explicitly Excluded from MVP (P1/P2)
 
-- Tool calls / function calling (Voice Live → backend APIs via APIM)
+- Extended tool calls beyond initial 3 (additional Oracle BRM / CRM operations)
+- Voice Live tool call configuration (tool definitions are managed in Voice Live system prompt, not bridge code)
+- Backend API service implementation behind APIM
 - Multi-language support (pt-BR only in MVP)
 - Call analytics / CDR pipeline
 - KEDA autoscaling
@@ -1477,19 +1554,19 @@ The application reads standard environment variables (`AZURE_CLIENT_ID`, `ACS_EN
 *Items removed from scope with defined reassessment triggers:*
 
 | Item | Removed Because | Reassessment Trigger |
-|------|----------------|---------------------|
+| ------ | ---------------- | --------------------- |
 | LGPD compliance module | Owned by separate compliance team | If compliance team cannot deliver before GA |
 | Container scanning | Platform team CI/CD responsibility | If platform team pipeline not ready by Phase 2 |
 | Call transfer | Out of product scope | If business requires warm transfer for escalation |
 | Abuse monitoring | ACS-level concern, not app-level | If ACS native rate limiting proves insufficient |
 | Fixture recorder | No test playback system planned | If regression testing requires deterministic audio replay |
-| PII masking | No PII flows through audio bridge in MVP (no tool calls = no structured data) | If tool calls (Phase 2) introduce structured PII in logs/traces |
+| PII masking | No PII flows through audio bridge in MVP (tool call responses are logged at INFO level with correlationId only, not response payloads) | If tool call responses introduce structured PII in logs/traces |
 
 ### Phase 2 — Growth (Post-MVP)
 
 | # | Capability | Depends On |
-|---|-----------|------------|
-| 1 | Tool call handler: Voice Live → APIM → backend APIs (Oracle BRM, CRM) | P0 audio bridge stable |
+| --- | ----------- | ------------ |
+| 1 | Extended tool calls beyond initial 3 (additional Oracle BRM, CRM operations via APIM) | P0 tool call framework stable |
 | 2 | Validate Voice Live API key auth is disabled in production config (FR12 enforces managed identity-only in P0; this item confirms no residual API key fallback) | P0 credential infra |
 | 3 | Prompt guardrails / content filtering | Tool call handler |
 | 4 | Nightly E2E test suite (synthetic calls) | P0 deployment |
@@ -1502,7 +1579,7 @@ The application reads standard environment variables (`AZURE_CLIENT_ID`, `ACS_EN
 ### Phase 3 — Scale
 
 | # | Capability | Depends On |
-|---|-----------|------------|
+| --- | ----------- | ------------ |
 | 1 | KEDA autoscaling based on active WebSocket connection count | Phase 2 metrics |
 | 2 | Multi-language support (es, en beyond pt-BR) | Phase 2 prompt framework |
 | 3 | Call analytics dashboard (Power BI / Grafana) | Phase 2 CDR pipeline |
@@ -1514,7 +1591,7 @@ The application reads standard environment variables (`AZURE_CLIENT_ID`, `ACS_EN
 #### Technical Risks
 
 | Risk | Probability | Impact | Mitigation |
-|------|------------|--------|------------|
+| ------ | ------------ | -------- | ------------ |
 | Voice Live API latency spikes >500ms | Medium | High | Circuit breaker (P0 item 10); fallback: play hold tone while reconnecting |
 | ACS audio format mismatch with Voice Live | Low | Critical | Both use PCM 24K mono — validated in .NET reference. Day 2 integration test confirms. |
 | Voice Live WebSocket drops under load | Medium | High | Heartbeat (P0 item 9) + circuit breaker + reconnection window |
@@ -1525,14 +1602,14 @@ The application reads standard environment variables (`AZURE_CLIENT_ID`, `ACS_EN
 #### Market Risks
 
 | Risk | Probability | Impact | Mitigation |
-|------|------------|--------|------------|
+| ------ | ------------ | -------- | ------------ |
 | Voice Live API preview breaking changes | Medium | High | Pin `api-version=2025-05-01-preview`; monitor Azure changelog weekly |
 | ACS Call Automation SDK breaking changes | Low | Medium | Pin SDK version 1.6.0; test before upgrading |
 
 #### Resource Risks
 
 | Risk | Probability | Impact | Mitigation |
-|------|------------|--------|------------|
+| ------ | ------------ | -------- | ------------ |
 | Single developer unavailable (illness, etc.) | Low | Critical | All code in Git; comprehensive README; Copilot instructions enable any Java dev to continue |
 | Azure resource quota limits | Low | Medium | Pre-provisioned; quota checked before sprint |
 | Voice Live API rate limits hit during testing | Medium | Low | Use single-call tests; no load testing in MVP |
@@ -1542,50 +1619,51 @@ The application reads standard environment variables (`AZURE_CLIENT_ID`, `ACS_EN
 #### Day 1 — Scaffold & Ingress (8h)
 
 | Hours | Task | Produces |
-|-------|------|----------|
+| ------- | ------ | ---------- |
 | 0–2 | Spring Boot 4.x project init: Maven, Java 21, Virtual Threads, health actuator | Running app with `/actuator/health` |
 | 2–4 | Event Grid webhook controller: `IncomingCall` event handling, `SubscriptionValidationEvent` handshake | POST `/api/v1/events` accepting Event Grid |
 | 4–6 | `CallAutomationClient` bean + answer call logic + callback handler (`CallConnected`, `CallDisconnected`, `PlayFailed`) | Call answered, callbacks logged |
 | 6–8 | OpenAPI 3.0 spec for HTTP endpoints + config externalization (`application.yaml` with all C-* params) | Documented API, configurable app |
 
-#### Day 2 — Audio Bridge & Resilience (8h)
+#### Day 2 — Audio Bridge, Resilience & Tool Call Framework (8h)
 
 | Hours | Task | Produces |
-|-------|------|----------|
+| ------- | ------ | ---------- |
 | 0–1 | **Spike:** Verify Voice Live API supports `conversation.item.create` mid-session for max-duration wrap-up. **No-go impact:** FR6 and FR16 revert to hard disconnect at max-duration (no AI wrap-up message); FR6 acceptance criteria adjusted to require only hard disconnect + log event. | Go/no-go on UX-REQ-9 approach |
 | 1–3 | JSR 356 `@ServerEndpoint` at `/ws/v1` — accept ACS audio stream, parse `AudioData` via `StreamingData.parse()` | ACS audio flowing into service |
 | 3–5 | Voice Live WebSocket client (`java.net.http.WebSocket`) — connect, authenticate with `DefaultAzureCredential`, send/receive events | Service connected to Voice Live |
 | 5–6 | Audio bridge: bidirectional PCM forwarding + linked lifecycle (either-side close → both teardown ≤3s) | End-to-end audio path |
 | 6–7 | Heartbeat/keepalive on both WS connections + circuit breaker on Voice Live | Resilient connections |
-| 7–8 | OpenTelemetry SDK setup + 4 call lifecycle spans | Distributed tracing operational |
+| 7–8 | Tool call handler: receive `tool_call` from Voice Live → dispatch HTTPS to APIM via `java.net.http.HttpClient` + `DefaultAzureCredential` → return `tool_call_output`. Tool definitions file loading (C-60) + `session.update` tool registration. | Tool call dispatcher + definitions operational |
 
-#### Day 3 — Conversation Quality & First Call (8h)
+#### Day 3 — Tool Call Hardening, Conversation Quality & First Call (8h)
 
 | Hours | Task | Produces |
-|-------|------|----------|
-| 0–2 | Barge-in: forward `input_audio_buffer.speech_started` / `speech_stopped` from Voice Live to ACS | Natural conversation flow |
-| 2–3 | VAD tuning: expose silence threshold + end-of-speech delay as config (C-40–C-42) | Environment-specific voice detection |
-| 3–4 | Max-duration wrap-up: implement graceful AI closing message 30s before timeout (based on Day 2 spike result) | Graceful call endings |
-| 4–6 | **First real end-to-end call**: ACS phone number → Event Grid → service → Voice Live → AI voice response heard by caller | 🎯 MVP proof-of-life |
-| 6–8 | *(Stretch)* Reconnection window: 5s window to resume VL session on ACS reconnect. If not complete → Day 4 fallback. | Resilient reconnection |
+| ------- | ------ | ---------- |
+| 0–1 | Tool call timeout (C-58) + error handling + max concurrent guard (C-59) + WireMock gateway stubs in test profile | Robust tool call error path |
+| 1–2 | OpenTelemetry SDK setup + 4 call lifecycle spans + tool call spans | Distributed tracing operational |
+| 2–4 | Barge-in: forward `input_audio_buffer.speech_started` / `speech_stopped` from Voice Live to ACS | Natural conversation flow |
+| 4–5 | VAD tuning: expose silence threshold + end-of-speech delay as config (C-40–C-42) | Environment-specific voice detection |
+| 5–6 | Max-duration wrap-up: implement graceful AI closing message 30s before timeout (based on Day 2 spike result) | Graceful call endings |
+| 6–8 | **First real end-to-end call**: ACS phone number → Event Grid → service → Voice Live → AI voice response heard by caller. Tool call round-trip proven (user data retrieval via APIM gateway stub). | 🎯 MVP proof-of-life + tool call proven |
 
 #### Day 4 — Security & Hardening (8h)
 
 | Hours | Task | Produces |
-|-------|------|----------|
+| ------- | ------ | ---------- |
 | 0–2 | JWT validation on all inbound webhooks + WebSocket upgrade requests | Authenticated ingress |
 | 2–3 | `CallAutomationClient` switched to `DefaultAzureCredential` (remove any connection string usage) | Zero secrets in code |
 | 3–4 | WSS-only enforcement + callback deduplication (Caffeine cache) | Secure + idempotent |
 | 4–5 | `CredentialHealthChecker` + three-tier health probes (startup/liveness/readiness) | Production-grade health |
 | 5–6 | Structured JSON logging + correlation ID propagation across both WS connections | Observable calls |
-| 6–8 | *(If reconnection window not done on Day 3)* Complete reconnection window implementation | REQ-R1.3–R1.4 complete |
+| 6–8 | Reconnection window: 5s window to resume VL session on ACS reconnect (FR20/FR21) | REQ-R1.3–R1.4 complete |
 
 #### Day 5 — Tests & Deployment (8h)
 
 | Hours | Task | Produces |
-|-------|------|----------|
-| 0–3 | Unit tests: audio bridge, lifecycle management, circuit breaker, credential checker | ≥80% coverage on critical paths |
-| 3–5 | Integration tests: Event Grid → answer → audio bridge → Voice Live (mocked WS) | End-to-end flow verified |
+| ------- | ------ | ---------- |
+| 0–3 | Unit tests: audio bridge, lifecycle management, circuit breaker, credential checker, tool call dispatcher/timeout | ≥80% coverage on critical paths |
+| 3–5 | Integration tests: Event Grid → answer → audio bridge → Voice Live (mocked WS) + tool call round-trip (WireMock gateway stub) | End-to-end flow verified |
 | 5–6 | AKS deployment manifests: Deployment, Service, Ingress, CSI SecretProviderClass CRD | K8s-ready artifacts |
 | 6–7 | Deploy to AKS + smoke test (real call through deployed service) | Production deployment verified |
 | 7–8 | README quickstart + WebSocket protocol doc | Developer onboarding docs |
@@ -1594,14 +1672,14 @@ The application reads standard environment variables (`AZURE_CLIENT_ID`, `ACS_EN
 
 ## Functional Requirements
 
-*Synthesized from all discovery sections (Steps 2–8). 46 requirements across 9 capability areas. Every P0 scoping item, acceptance criterion, and security requirement has at least one corresponding FR. Enhanced via Comparative Analysis Matrix elicitation (13 gaps identified and patched), User Persona Focus Group elicitation (2 new FRs, 2 FR enhancements, 1 preamble addition), and Critique & Refine elicitation (3 critical fixes, 4 moderate fixes, 2 low refinements; FR15 absorbed into FR13+FR31).*
+*Synthesized from all discovery sections (Steps 2–8). 50 requirements across 10 capability areas. Every P0 scoping item, acceptance criterion, and security requirement has at least one corresponding FR. Enhanced via Comparative Analysis Matrix elicitation (13 gaps identified and patched), User Persona Focus Group elicitation (2 new FRs, 2 FR enhancements, 1 preamble addition), Critique & Refine elicitation (3 critical fixes, 4 moderate fixes, 2 low refinements; FR15 absorbed into FR13+FR31), and Edit Step E-3 (tool call framework promotion: FR48–FR51 added, FR13 updated with tool definitions).*
 
 ### Self-Validation
 
 | Check | Result |
-|-------|--------|
-| All 26 P0 scoping items traced | ✅ Each P0 item maps to ≥1 FR |
-| All 5 user journeys covered | ✅ Maria (FR1–FR14, FR16, FR46), Carlos (FR17–FR21, FR33–FR35, FR47), Renata (FR28–FR32, FR41), Thiago (FR13), Lucas (FR28–FR32) |
+| ------- | -------- |
+| All 30 P0 scoping items traced | ✅ Each P0 item maps to ≥1 FR |
+| All 5 user journeys covered | ✅ Maria (FR1–FR14, FR16, FR46, FR48–FR51), Carlos (FR17–FR21, FR33–FR35, FR47), Renata (FR28–FR32, FR41), Thiago (FR13), Lucas (FR28–FR32) |
 | Implementation-agnostic | ✅ No class names, framework APIs, or library references in FR text (CR-4 fixed FR23/FR24 violations) |
 | Each FR independently testable | ✅ Each FR has a verifiable behavior with observable inputs/outputs |
 | Defensive behaviors covered | ✅ FR33–FR47 cover admission, SIGTERM, fallback prompts, replay, rate limit, orphan reaper, idle detection, mid-stream stall, PlayFailed terminal |
@@ -1615,7 +1693,7 @@ The application reads standard environment variables (`AZURE_CLIENT_ID`, `ACS_EN
 ### Capability 1: Call Ingestion & Lifecycle Management
 
 | ID | Functional Requirement | Trace |
-|----|----------------------|-------|
+| ---- | ---------------------- | ------- |
 | FR1 | The system SHALL receive `IncomingCall` events from Azure Event Grid via HTTPS webhook and initiate the call-answer sequence within the configured ring timeout (C-03). | T-01, P0 #2 |
 | FR2 | The system SHALL answer incoming calls using ACS Call Automation with bidirectional media streaming enabled (PCM 24K mono). | T-03, P0 #4 |
 | FR3 | The system SHALL handle ACS mid-call callback events (`CallConnected`, `CallDisconnected`, `PlayFailed`, `PlayCompleted`) and update internal call state accordingly. | T-06, P0 #3 |
@@ -1626,7 +1704,7 @@ The application reads standard environment variables (`AZURE_CLIENT_ID`, `ACS_EN
 ### Capability 2: Real-Time Audio Communication
 
 | ID | Functional Requirement | Trace |
-|----|----------------------|-------|
+| ---- | ---------------------- | ------- |
 | FR7 | The system SHALL accept inbound WebSocket connections from ACS at the versioned path `/ws/v1` and parse incoming binary frames into `AudioMetadata` and `AudioData` packets. | T-06, P0 #4 |
 | FR8 | The system SHALL send outbound audio to ACS via the same WebSocket connection using the ACS SDK's outbound streaming data format. | T-17, P0 #6 |
 | FR9 | The system SHALL forward audio bidirectionally between ACS and Voice Live in real-time without buffering, inspecting, or transforming the audio content (protocol translation only). | AP-1, P0 #6 |
@@ -1635,17 +1713,17 @@ The application reads standard environment variables (`AZURE_CLIENT_ID`, `ACS_EN
 ### Capability 3: Conversational AI Integration
 
 | ID | Functional Requirement | Trace |
-|----|----------------------|-------|
+| ---- | ---------------------- | ------- |
 | FR11 | The system SHALL establish an outbound WebSocket connection to the Voice Live API endpoint (C-07) with the configured API version (C-08) within the connect timeout (C-10). | T-08, T-11, P0 #5 |
 | FR12 | The system SHALL authenticate to the Voice Live API using managed identity credentials, with no API keys in code or configuration. | SEC-REQ-11, P0 #7 |
-| FR13 | The system SHALL send a `session.update` event to Voice Live upon connection, configuring the session with the externalized system prompt (C-12), voice model (C-13), and turn detection settings — including VAD type, threshold, silence duration, noise suppression, and echo cancellation (C-14 through C-18). If Voice Live rejects the session (error response or no `session.created` within C-51), the system SHALL log the rejection at WARN level including the `correlationId`, the Voice Live error code and message (if provided), and the system prompt size in characters — enabling operators and domain specialists to distinguish prompt-related rejections (e.g., prompt too large, invalid voice model ID) from infrastructure failures (e.g., network timeout, auth failure). This diagnostic detail is critical because the system prompt is the primary per-client customization point, and prompt authors need actionable feedback when their content causes session failures. | T-13, P0 #14, FG-4 |
+| FR13 | The system SHALL send a `session.update` event to Voice Live upon connection, configuring the session with the externalized system prompt (C-12), voice model (C-13), tool definitions loaded from the externalized definitions file (C-60), and turn detection settings — including VAD type, threshold, silence duration, noise suppression, and echo cancellation (C-14 through C-18). If Voice Live rejects the session (error response or no `session.created` within C-51), the system SHALL log the rejection at WARN level including the `correlationId`, the Voice Live error code and message (if provided), and the system prompt size in characters — enabling operators and domain specialists to distinguish prompt-related rejections (e.g., prompt too large, invalid voice model ID) from infrastructure failures (e.g., network timeout, auth failure). This diagnostic detail is critical because the system prompt is the primary per-client customization point, and prompt authors need actionable feedback when their content causes session failures. | T-13, P0 #14, P0 #29, FG-4 |
 | FR14 | Upon receiving `input_audio_buffer.speech_started` from Voice Live, the system SHALL immediately (i) stop forwarding Voice Live audio frames to ACS and (ii) cancel any in-progress ACS Play operation, treating both actions as idempotent operations safe to invoke redundantly. | UX-REQ-5, UX-REQ-8, T-18, T-25, CR-1 |
 | FR16 | The system SHALL support injecting system-level messages to Voice Live mid-session (e.g., max-duration wrap-up notification) when triggered by lifecycle events. | UX-REQ-9, T-21, P0 #15 |
 
 ### Capability 4: Connection Resilience & Recovery
 
 | ID | Functional Requirement | Trace |
-|----|----------------------|-------|
+| ---- | ---------------------- | ------- |
 | FR17 | The system SHALL implement heartbeat/keepalive on both WebSocket connections and detect connection staleness within the configured idle timeout (C-05, C-11). Upon detecting staleness, the system SHALL force-close the stale WebSocket connection, triggering the linked lifecycle teardown per FR10. | REQ-R1.2, P0 #9, CR-2 |
 | FR18 | The system SHALL implement a circuit breaker on Voice Live connections that trips to OPEN state after N consecutive connection failures (C-22), preventing new calls from attempting doomed connections. | REQ-R2.1, P0 #10 |
 | FR19 | The circuit breaker SHALL transition through CLOSED → OPEN → HALF-OPEN → CLOSED states, with configurable half-open delay (C-23) and success threshold for recovery (C-24). | REQ-R2.1, T-08, T-09 |
@@ -1656,7 +1734,7 @@ The application reads standard environment variables (`AZURE_CLIENT_ID`, `ACS_EN
 ### Capability 5: Security & Authentication
 
 | ID | Functional Requirement | Trace |
-|----|----------------------|-------|
+| ---- | ---------------------- | ------- |
 | FR22 | The system SHALL validate JWT tokens in the `Authorization` header during WebSocket upgrade handshake, rejecting connections with HTTP 401 before upgrading if the token is invalid, expired, or missing. | SEC-REQ-1, AC-15, P0 #18 |
 | FR23 | The system SHALL authenticate to ACS Call Automation using managed identity credentials, with no connection strings or API keys in code, configuration, or secret stores. | SEC-REQ-11, AC-22, P0 #17, CR-4 |
 | FR24 | The system SHALL authenticate to Voice Live API using managed identity credentials. *Infrastructure prerequisite: RBAC role `Cognitive Services User` on the Foundry resource.* | SEC-REQ-11, P0 #7, CR-4 |
@@ -1667,7 +1745,7 @@ The application reads standard environment variables (`AZURE_CLIENT_ID`, `ACS_EN
 ### Capability 6: Operational Observability
 
 | ID | Functional Requirement | Trace |
-|----|----------------------|-------|
+| ---- | ---------------------- | ------- |
 | FR28 | The system SHALL emit all log events in structured JSON format, with every entry including `correlationId` (ACS call ID for domain-level correlation), `timestamp`, `level`, and `component` fields. When an OpenTelemetry trace context is active, each log entry SHALL additionally include `traceId` and `spanId` fields, enabling direct correlation between distributed tracing spans (FR29) and log lines in observability tooling. This dual-ID approach supports two complementary query paths: searching logs by `correlationId` for a business-level call view, and searching by `traceId` for an infrastructure-level request flow view. | P0 #24, Observability, FG-3 |
 | FR29 | The system SHALL emit distributed tracing spans for the 4 defined call lifecycle operations (`ivr.call`, `ivr.call.answer`, `ivr.call.voicelive.connect`, `ivr.call.audio.bridge`). | P0 #11, Observability |
 | FR30 | The system SHALL expose three-tier health probes: startup (first managed identity token acquisition), liveness (Spring context alive), readiness (cached credential status + Voice Live DNS resolution). | P0 #23, API Backend |
@@ -1677,7 +1755,7 @@ The application reads standard environment variables (`AZURE_CLIENT_ID`, `ACS_EN
 ### Capability 7: Call Admission & Lifecycle Edge Cases
 
 | ID | Functional Requirement | Trace |
-|----|----------------------|-------|
+| ---- | ---------------------- | ------- |
 | FR33 | The system SHALL track instance-local active concurrent calls and reject incoming calls with a spoken busy prompt (C-38) when the instance-local active call count exceeds the per-instance admission threshold (C-26). | REQ-R4.1, UX-REQ-11, T-02, CR-3 |
 | FR34 | On SIGTERM, the system SHALL mark readiness probe unhealthy immediately, send a wrap-up notification to in-flight Voice Live sessions, and allow active calls to complete within drain timeout (C-34) before forcefully terminating connections. | REQ-R3.1, REQ-R3.2, T-23 |
 | FR35 | The system SHALL play pre-recorded audio prompts via ACS Play action for the following lifecycle events: (a) comfort tone if VL connection exceeds C-33, (b) fallback greeting if no AI audio within C-32, (c) apology prompt on unexpected VL disconnect, (d) busy prompt on admission rejection, (e) service-unavailable prompt when circuit breaker is open. | UX-REQ-1, UX-REQ-3, UX-REQ-10, UX-REQ-11, REQ-R2.2 |
@@ -1688,7 +1766,7 @@ The application reads standard environment variables (`AZURE_CLIENT_ID`, `ACS_EN
 ### Capability 8: Defense-in-Depth Security
 
 | ID | Functional Requirement | Trace |
-|----|----------------------|-------|
+| ---- | ---------------------- | ------- |
 | FR36 | The system SHALL generate a cryptographically random token with a minimum length (C-50) and embed it in each callback URL registered with ACS, validating the token on every callback request. | SEC-REQ-4, S-4, CR-9 |
 | FR37 | The system SHALL validate the `eventTime` of each Event Grid event and reject events older than the configured maximum age (C-45) to prevent replay attacks. | SEC-REQ-14, AC-16 |
 | FR38 | The system SHALL enforce per-IP rate limiting on WebSocket handshake attempts, rejecting connections exceeding C-46 per C-47 window with HTTP 429. | SEC-REQ-15, AS-5 |
@@ -1698,21 +1776,30 @@ The application reads standard environment variables (`AZURE_CLIENT_ID`, `ACS_EN
 ### Capability 9: Operational Safety Nets
 
 | ID | Functional Requirement | Trace |
-|----|----------------------|-------|
+| ---- | ---------------------- | ------- |
 | FR41 | The system SHALL periodically probe Voice Live API connectivity (C-25 interval) and preemptively trip the circuit breaker if probes fail. | REQ-R2.4 |
 | FR44 | The system SHALL process Event Grid event batches individually, returning HTTP 200 for the batch even if individual events fail processing, logging failures per event. *Required test scenario: mixed batch (e.g., 3 events — 1 valid `IncomingCall`, 1 malformed, 1 valid) — verify the 2 valid events are processed and the malformed event is logged without poisoning the batch.* | API Backend Data Schemas |
 | FR45 | The system SHALL use lenient JSON deserialization for Voice Live events (ignoring unknown fields) and increment a parse error counter metric on deserialization failures. | API Backend Parsing Rules |
+
+### Capability 10: Tool Call Framework
+
+| ID | Functional Requirement | Trace |
+| ---- | ---------------------- | ------- |
+| FR48 | Upon receiving a `tool_call` event from Voice Live, the system SHALL dispatch an HTTPS request to the configured API gateway base URL (C-57) using `java.net.http.HttpClient` on a virtual thread, authenticating with `DefaultAzureCredential` (scope C-57b). The request SHALL include the tool call name, arguments, and the call's `correlationId`. | AP-3, P0 #27, SEC-REQ-18 |
+| FR49 | Upon receiving a successful HTTP response from the API gateway, the system SHALL forward the result to Voice Live as a `tool_call_output` event containing the tool call ID and the response payload. | P0 #28 |
+| FR50 | If the API gateway does not respond within the configured timeout (C-58), or returns an HTTP error (4xx/5xx), the system SHALL return a `tool_call_output` event to Voice Live with an error payload indicating the failure reason, log the failure at WARN level with `correlationId`, tool name, HTTP status (if available), and elapsed time, and increment the `ivr.tool_call.errors` metric. The system SHALL NOT terminate the call due to a tool call failure — the AI conversation continues. | AC-24, P0 #30, C-58 |
+| FR51 | At session initialization, the system SHALL load tool definitions from the externalized definitions file (C-60), validate the JSON structure, and include the tool definitions in the `session.update` event sent to Voice Live (FR13). If the definitions file is missing or contains invalid JSON, the system SHALL log at ERROR level and start the session without tool definitions (degraded mode). | P0 #29, C-60 |
 
 ---
 
 ## Non-Functional Requirements
 
-*Synthesized from all discovery sections (Steps 2–8) and 46 Functional Requirements. 43 NFRs across 6 categories, enhanced via two elicitation rounds: Comparative Analysis Matrix (13 gaps identified → 13 NFRs added) and Constraint Mapping (8 tensions resolved → 8 NFR refinements).*
+*Synthesized from all discovery sections (Steps 2–8) and 50 Functional Requirements. 47 NFRs across 6 categories, enhanced via two elicitation rounds: Comparative Analysis Matrix (13 gaps identified → 13 NFRs added) and Constraint Mapping (8 tensions resolved → 8 NFR refinements).*
 
 ### Self-Validation
 
 | Check | Result |
-|-------|--------|
+| ------- | -------- |
 | All Success Criteria measurable outcomes traced | ✅ Each outcome maps to ≥1 NFR |
 | All Resilience requirements (FM-1–FM-5) covered | ✅ 5/5 |
 | All Architectural Principles (AP-1–AP-6) covered | ✅ 6/6 |
@@ -1724,16 +1811,16 @@ The application reads standard environment variables (`AZURE_CLIENT_ID`, `ACS_EN
 ### Elicitation History
 
 | Round | Method | Findings | Result |
-|-------|--------|----------|--------|
+| ------- | -------- | ---------- | -------- |
 | 1 | Comparative Analysis Matrix | 13 gaps (G-1–G-13) across 9 discovery categories | 13 NFRs added (R8–R13, SEC8–SEC10, P9, I5–I7) |
 | 2 | Constraint Mapping | 1 critical contradiction, 3 high tensions, 4 moderate tensions | 8 NFR refinements (R2, R12, P1, P6, S6, SEC10, P9, I5) |
 
 ---
 
-### Category 1: Performance (9 NFRs)
+### Category 1: Performance (10 NFRs)
 
 | ID | Non-Functional Requirement | Metric | Target | Trace |
-|----|--------------------------|--------|--------|-------|
+| ---- | -------------------------- | -------- | -------- | ------- |
 | NFR-P1 | **Time-to-First-Audio** — elapsed time from `CallConnected` event to first audio byte sent to ACS. *Implementation note: JWKS cache MUST be pre-warmed during startup to eliminate cold-call JWT latency from the critical path.* | `ivr.time_to_first_audio` (Timer) | < 3s p95 | Success Criteria, UX-REQ-4, AC-9 |
 | NFR-P2 | **AI Response Latency** — elapsed time from end of caller speech (VAD end-of-speech) to first `response.audio.delta` from Voice Live. | `ivr.ai.response.latency` (Timer) | < 1s p95 | UX-REQ-7, Journey 1 |
 | NFR-P3 | **Barge-In Latency** — elapsed time from `input_audio_buffer.speech_started` event received from Voice Live to `StopAudio` command sent to ACS. | `ivr.bargein.latency` (Timer) | < 100ms p95 | UX-REQ-5, UX-REQ-8, AC-3, Success Criteria |
@@ -1743,11 +1830,12 @@ The application reads standard environment variables (`AZURE_CLIENT_ID`, `ACS_EN
 | NFR-P7 | **Per-Call Memory** — maximum heap allocation attributable to a single active call's state (call context, buffers, WS frames). | Profiler / heap dump analysis | ≤ 200 KB per call | FM-3, AP-4 |
 | NFR-P8 | **Zero-Copy Audio Forwarding** — audio bytes SHALL NOT be copied to intermediate buffers, temporary storage, or duplicate data structures during the forwarding path. Protocol translation (binary ↔ base64) is permitted; content duplication is not. | Code review + allocation profiler | Zero unnecessary copies | AP-3, AP-4 |
 | NFR-P9 | **Application Startup Time** — elapsed time from JVM launch to readiness probe returning HTTP 200. Assumes workload identity (fastest credential path). Credential acquisition capped at 15s — if token not acquired within 15s, startup fails rather than hanging. *(Constraint Mapping CT-4)* | `application.started.time` (Spring metric) | ≤ 30s (cold JVM, no CDS) | P0 #23, FR30, API Backend Health Probes |
+| NFR-P10 | **Tool Call Round-Trip Latency** — elapsed time from receiving a `tool_call` event from Voice Live to sending the `tool_call_output` event back, including APIM gateway HTTP call, `DefaultAzureCredential` token acquisition, and response parsing. | `ivr.tool_call.latency` (Timer) | ≤ 5s p95 | FR48, FR49, AC-23, C-58 |
 
-### Category 2: Reliability (13 NFRs)
+### Category 2: Reliability (14 NFRs)
 
 | ID | Non-Functional Requirement | Metric | Target | Trace |
-|----|--------------------------|--------|--------|-------|
+| ---- | -------------------------- | -------- | -------- | ------- |
 | NFR-R1 | **Service Availability** — percentage of time the service accepts and processes incoming calls (excludes planned maintenance). | Uptime monitoring (health probe success rate) | ≥ 99.9% | Success Criteria |
 | NFR-R2 | **Linked Lifecycle Teardown** — elapsed time from one WebSocket closing to the peer WebSocket being fully closed + resources freed. Applies to **non-reconnectable closures** only: close codes `1000` (normal), `1001` (going away), or explicit caller/AI hangup. Reconnectable closures (code `1006`, transport errors) defer to NFR-R12's reconnection window. *(Constraint Mapping CT-CRITICAL)* | `ivr.call.teardown.latency` (Timer) | ≤ 3s | REQ-R1.1, FR10, T-19, T-20 |
 | NFR-R3 | **Circuit Breaker Activation** — when Voice Live connections fail consecutively (C-22), the circuit breaker SHALL trip within 1 call of threshold, preventing wasted connection attempts. | `ivr.circuit_breaker.state` (Gauge) + transition log | Trips at exactly C-22 failures | REQ-R2.1, FR18, FR19 |
@@ -1758,14 +1846,15 @@ The application reads standard environment variables (`AZURE_CLIENT_ID`, `ACS_EN
 | NFR-R8 | **Call Completion Rate** — ratio of calls that are answered and reach a graceful end (caller hangup, AI-initiated close, or max-duration wrap-up) to total calls answered. Excludes calls rejected by admission control (FR33) which are not "answered." | `ivr.call.completion.rate` (computed: graceful_ends / total_answered) | ≥ 99% | Success Criteria (Measurable Outcomes) |
 | NFR-R9 | **Heartbeat Detection Latency** — elapsed time from last successful heartbeat response to staleness detection event. Measures how quickly the system detects a dead WebSocket connection. | `ivr.ws.staleness.detection.latency` (Timer) | ≤ 3s | FM-4, REQ-R1.2, FR17, P0 #9 |
 | NFR-R10 | **Configuration Fail-Fast** — the application SHALL fail to start within 5s with a descriptive error message if any required configuration parameter is missing, null, or violates its declared validation range (as defined in the Configuration Catalog). Prevents misconfigured deployments from accepting traffic and failing unpredictably at first call. | Startup fails with descriptive error (integration test) | 100% of invalid configs caught at boot | Config Catalog (C-01–C-56), AP-1 |
-| NFR-R11 | **Observability Signal Completeness** — for each completed call lifecycle (IDLE → ... → CLOSED), all applicable log events (from the 20 defined) and all applicable metrics (from the 14 defined) SHALL be emitted. Missing signals are invisible by definition — this NFR makes their absence detectable. | Per-call audit in integration tests | ≥ 99% signal completion rate | Observability Requirements, Journey 3 (Renata) |
+| NFR-R11 | **Observability Signal Completeness** — for each completed call lifecycle (IDLE → ... → CLOSED), all applicable log events (from the 23 defined) and all applicable metrics (from the 16 defined) SHALL be emitted. Missing signals are invisible by definition — this NFR makes their absence detectable. | Per-call audit in integration tests | ≥ 99% signal completion rate | Observability Requirements, Journey 3 (Renata) |
 | NFR-R12 | **Reconnection Window Compliance** — when an ACS WebSocket closes with an abnormal close code (`1006`) or transport error, the system SHALL hold the Voice Live session open for the configured reconnection window (C-28, default 5s) before teardown. Normal closures (`1000`, `1001`) trigger immediate NFR-R2 teardown instead. *(Constraint Mapping CT-CRITICAL)* | `ivr.reconnection.window.used` (Timer) | Session held ≤ C-28 (5s); resume attempted if ACS reconnects | REQ-R1.3, FR20, P0 #13 |
 | NFR-R13 | **Stall Detection Accuracy** — mid-stream stall detection (FR46, C-55) SHALL NOT prematurely terminate calls that are actually processing. Validated via post-hoc log analysis correlating stall terminations with Voice Live's actual response behavior. *Operational note: stall timeout (C-55) should be validated against observed Voice Live response latency distribution before tightening below 5s.* | False positive rate (stall terminations that were actually processing) *(production metric — not CI-gated; requires production log analysis)* | < 1% false positives | FR46, FG-1 |
+| NFR-R14 | **Tool Call Timeout Handling** — when the API gateway does not respond within C-58, the system SHALL return an error `tool_call_output` to Voice Live and continue the call without interruption. The AI conversation SHALL degrade gracefully (no data fetched) rather than terminate. | `ivr.tool_call.errors` (Counter, tag: `timeout`) + call continuation verified in integration test | 100% timeout-handling coverage; 0 call terminations from tool call failures | FR50, AC-24, C-58 |
 
 ### Category 3: Scalability (6 NFRs)
 
 | ID | Non-Functional Requirement | Metric | Target | Trace |
-|----|--------------------------|--------|--------|-------|
+| ---- | -------------------------- | -------- | -------- | ------- |
 | NFR-S1 | **Concurrent Call Capacity** — maximum simultaneous active calls per service instance without degradation of NFR-P1 through NFR-P4. | `ivr.calls.active` (Gauge) at load | 50 calls per instance | Success Criteria, C-26, Load Targets |
 | NFR-S2 | **Sustained Load Stability** — under sustained load at NFR-S1 capacity for ≥30 minutes, zero OOM kills, zero thread starvation, zero connection pool exhaustion. | Load test: 50 calls × 30 min | Zero errors, stable latency percentiles | Load Targets |
 | NFR-S3 | **Instance Memory Limit** — total container memory usage (heap + off-heap + OS) at full capacity (50 concurrent calls). | Container metrics (`container_memory_working_set_bytes`) | ≤ 1 GB | FM-3, Deployment (512MB–1GB per instance) |
@@ -1776,7 +1865,7 @@ The application reads standard environment variables (`AZURE_CLIENT_ID`, `ACS_EN
 ### Category 4: Security (10 NFRs)
 
 | ID | Non-Functional Requirement | Metric | Target | Trace |
-|----|--------------------------|--------|--------|-------|
+| ---- | -------------------------- | -------- | -------- | ------- |
 | NFR-SEC1 | **WebSocket Authentication Coverage** — every WebSocket upgrade request to `/ws/v1` SHALL be authenticated via JWT validation before the connection upgrades. Zero unauthenticated connections. | `ivr.security.auth.rejected` (Counter by reason) | 100% validation; 0 unauthenticated upgrades | SEC-REQ-1, FR22, AC-15 |
 | NFR-SEC2 | **Zero Secrets in Code/Config** — no API keys, connection strings, passwords, or bearer tokens in source code, committed config files, or container images. Secrets resolved at runtime via managed identity or K8s CSI SecretProviderClass. | Static analysis (grep + secret scanner in CI) | Zero findings | SEC-REQ-11, AC-22, FR23, FR24 |
 | NFR-SEC3 | **WSS-Only Enforcement** — all WebSocket connections (both ACS-facing server and Voice Live-facing client) use `wss://`. Zero `ws://` connections initiated or accepted. | Config validation + integration test | Zero plaintext WebSocket connections | FR26 |
@@ -1791,7 +1880,7 @@ The application reads standard environment variables (`AZURE_CLIENT_ID`, `ACS_EN
 ### Category 5: Integration Reliability (7 NFRs)
 
 | ID | Non-Functional Requirement | Metric | Target | Trace |
-|----|--------------------------|--------|--------|-------|
+| ---- | -------------------------- | -------- | -------- | ------- |
 | NFR-I1 | **Fallback Prompt Coverage** — every failure mode that leaves the caller in silence (VL disconnect, VL session timeout, circuit breaker open, admission rejection, first-audio timeout) SHALL play an appropriate fallback audio prompt before disconnecting. | Integration tests per failure mode | 100% coverage for all 5 defined failure modes (FR35a–e) | UX-REQ-1, UX-REQ-3, UX-REQ-10, UX-REQ-11 |
 | NFR-I2 | **No Reactive Types** — zero usage of `Mono`, `Flux`, `Publisher`, or any Project Reactor / RxJava types in production code. All async I/O via virtual threads (`spring.threads.virtual.enabled=true`). | Static analysis (class usage scan) | Zero reactive type references | AP-2, .github/copilot-instructions.md |
 | NFR-I3 | **Lenient Voice Live Deserialization** — Voice Live JSON events with unknown fields SHALL be deserialized without error. Parse failures SHALL increment a counter metric, not crash the session. | `ivr.voicelive.parse_errors_total` (Counter) + test with extra fields | Zero session crashes from unknown fields | FR45, API Backend Parsing Rules |
@@ -1805,7 +1894,7 @@ The application reads standard environment variables (`AZURE_CLIENT_ID`, `ACS_EN
 *Critical tensions between NFRs identified and resolved during Constraint Mapping elicitation. Referenced inline in affected NFRs.*
 
 | ID | Tension | NFRs Involved | Resolution |
-|----|---------|---------------|------------|
+| ---- | --------- | --------------- | ------------ |
 | CT-CRITICAL | Reconnection window (5s) vs. linked teardown (3s) — mathematically contradictory | NFR-R2, NFR-R12 | Disambiguated by close code: normal close → R2 (immediate teardown); abnormal close → R12 (reconnection window) |
 | CT-1 | VL connect p99 (3s) consumes entire first-audio budget (3s p95) | NFR-P1, NFR-P6 | Tightened P6 to ≤2s p95, ≤3s p99 |
 | CT-2 | Per-IP rate limiting blocks ACS shared-IP edge nodes | NFR-SEC10, FR38 | Rate limiting scoped to non-ACS IPs; ACS authenticated via JWT |
@@ -1818,7 +1907,7 @@ The application reads standard environment variables (`AZURE_CLIENT_ID`, `ACS_EN
 ### NFR × Priority Tier Cross-Reference
 
 | Priority | NFRs |
-|----------|------|
+| ---------- | ------ |
 | **P0 (MVP)** | NFR-P1–P6, NFR-P8–P9, NFR-R1–R12, NFR-S1–S6, NFR-SEC1–SEC10, NFR-I1–I5, NFR-I7 |
 | **P0 (measurable post-launch)** | NFR-P7 (profiler needed), NFR-R13 (post-hoc analysis), NFR-I6 (manual onboarding test) |
 | **Ongoing** | NFR-R8 (call completion rate — monitored continuously), NFR-R11 (observability completeness — validated per release) |
