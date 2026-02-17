@@ -347,7 +347,29 @@ This document provides the complete epic and story breakdown for agentic-ivr, de
 - FR50: Epic 5 — Tool call timeout/error handling (error payload, no call termination)
 - FR51: Epic 5 — Load tool definitions from external JSON file at session init
 
+### NFR Coverage Map (Test Infrastructure)
+
+- NFR-I5: Epic 0 — Cloud-free test suite (FakeAcsClient + FakeVoiceLiveServer + WireMock, zero Azure env vars)
+- NFR-I6: Epic 0 — Developer onboarding speed (test profile + fixture library enables immediate local testing)
+- NFR-I7: Epic 0 — Deterministic single-command build (test profile ensures `./mvnw clean package` passes without credentials)
+
 ## Epic List
+
+### Epic 0: Test Infrastructure & Developer Experience
+
+Both ACS and Voice Live are cloud-only services with no local emulators. Before any feature story can be tested, the project needs **in-process test simulators** that replicate the WebSocket behavior of both external systems, a fixture library of pre-recorded JSON/binary payloads, and a WireMock stub for the APIM gateway. This epic is a prerequisite for all others — without it, NFR-I5 (cloud-free test suite) cannot be satisfied and no integration test can run.
+
+**NFRs covered:** NFR-I5, NFR-I6, NFR-I7
+
+**Notes:**
+
+- FakeAcsClient + FakeVoiceLiveServer are P0 per PRD "Test Infrastructure" section
+- WireMock gateway stub is P0 for tool call testing (Epic 5)
+- Test fixture library (17 files) enables deterministic, repeatable tests
+- Spring `test` profile wires simulators to localhost URLs with zero auth
+- All subsequent epics depend on this infrastructure for their acceptance criteria
+
+---
 
 ### Epic 1: Project Foundation & Call Answering
 
@@ -459,6 +481,149 @@ The service protects itself from overload and handles every edge case — no orp
 - FR5 → callback deduplication via callId+eventType+correlationId cache
 - FR44 → Event Grid batch: process individually, 200 for batch, log per-event failures
 - FR45 → lenient VL JSON deserialization + parse error counter
+
+---
+
+## Epic 0: Test Infrastructure & Developer Experience
+
+Before any feature can be integration-tested, the project needs in-process simulators for both external WebSocket dependencies (ACS and Voice Live), a WireMock stub for the APIM gateway, and a library of pre-recorded test fixtures. These are P0 prerequisites — not optional test-nice-to-haves.
+
+### Story 0.1: FakeAcsClient — ACS WebSocket Simulator
+
+As a **developer**,
+I want an in-process WebSocket client that behaves like ACS connecting to our `@ServerEndpoint`,
+So that I can integration-test the audio server endpoint, audio bridge, and all downstream call lifecycle behavior without a real ACS instance.
+
+**Acceptance Criteria:**
+
+**Given** the FakeAcsClient
+**When** connecting to the service's WebSocket endpoint (`/ws/v1`)
+**Then** it establishes a WebSocket connection using the same protocol as ACS — sending an initial `AudioMetadata` JSON packet followed by binary `AudioData` frames (PRD §FakeAcsClient)
+
+**Given** pre-recorded PCM fixture files
+**When** loaded by FakeAcsClient
+**Then** it sends `AudioData` packets from those fixtures at a configurable rate, simulating real caller audio
+
+**Given** outbound audio from the bridge (AI responses)
+**When** the service sends audio frames back through the WebSocket
+**Then** FakeAcsClient captures all received frames for assertion — including content, ordering, and timing
+
+**Given** fault injection is configured
+**When** a test requires it
+**Then** FakeAcsClient can: (a) disconnect mid-stream (close code 1006), (b) send malformed binary data, (c) send silence-only packets, (d) delay connection, (e) close with specific close codes (1000, 1001, 1006)
+
+**Given** a test using FakeAcsClient
+**When** assertions are evaluated
+**Then** the API exposes: `getReceivedAudioFrames()`, `getReceivedEvents()`, `awaitFrameCount(n, timeout)`, and timing measurement helpers
+
+**Given** the WebSocket upgrade request
+**When** FakeAcsClient connects
+**Then** it can be configured to include or omit a JWT `Authorization` header — enabling both authenticated and unauthenticated test scenarios (Story 6.1 dependency)
+
+---
+
+### Story 0.2: FakeVoiceLiveServer — Voice Live WebSocket Simulator
+
+As a **developer**,
+I want an in-process WebSocket server that behaves like the Voice Live API accepting our outbound connection,
+So that I can integration-test Voice Live client connection, session initialization, audio forwarding, barge-in, tool calls, and all resilience scenarios without a real Voice Live instance.
+
+**Acceptance Criteria:**
+
+**Given** the FakeVoiceLiveServer
+**When** started in-process
+**Then** it listens on a configurable local port and accepts outbound WSS connections from the service's `VoiceLiveClient`
+
+**Given** the service sends a `session.update` event
+**When** FakeVoiceLiveServer receives it
+**Then** it validates the session configuration (system prompt, voice model, tool definitions, VAD settings) and responds with a `session.created` event (PRD §FakeVoiceLiveServer)
+
+**Given** the service sends `input_audio_buffer.append` events (caller audio)
+**When** FakeVoiceLiveServer receives them
+**Then** it collects the audio data for assertion — enabling verification that caller audio reaches Voice Live
+
+**Given** pre-scripted response sequences
+**When** configured for a test
+**Then** FakeVoiceLiveServer sends `response.audio.delta` events (AI audio), `input_audio_buffer.speech_started` (barge-in trigger), `tool_call` events, and `response.done` events in the configured order and timing
+
+**Given** tool call simulation
+**When** FakeVoiceLiveServer sends a `tool_call` event (e.g., `get_user_data`, `send_invoice`)
+**Then** it receives and validates the corresponding `tool_call_output` from the service — including tool call ID and response payload
+
+**Given** fault injection is configured
+**When** a test requires it
+**Then** FakeVoiceLiveServer can: (a) add configurable delay before `session.created`, (b) disconnect mid-audio-stream, (c) refuse connections (simulating 503), (d) send malformed JSON events, (e) stall mid-response (no `response.done` after `response.audio.delta`), (f) reject `session.update` with an error event
+
+**Given** a test using FakeVoiceLiveServer
+**When** assertions are evaluated
+**Then** the API exposes: `getReceivedSessionUpdate()`, `getReceivedAudioBuffers()`, `getReceivedToolCallOutputs()`, `awaitEvent(type, timeout)`, and session configuration validators
+
+---
+
+### Story 0.3: WireMock Gateway Stub & Test Fixture Library
+
+As a **developer**,
+I want WireMock stubs for the APIM gateway and a complete library of JSON/binary test fixtures,
+So that tool call integration tests run deterministically and all test scenarios have consistent, pre-recorded data.
+
+**Acceptance Criteria:**
+
+**Given** the WireMock gateway stub (test profile)
+**When** started alongside the Spring test context
+**Then** it responds on `localhost:8082` (matching C-57 test override) to `GET /api/v1/users/{id}` and `POST /api/v1/invoices/send`
+
+**Given** WireMock fault injection
+**When** configured for a test
+**Then** it supports: (a) configurable response delay exceeding C-58 for timeout testing, (b) 4xx/5xx HTTP error responses, (c) connection refused simulation
+
+**Given** WireMock request matching
+**When** a tool call request arrives
+**Then** assertions verify: `Authorization: Bearer <token>` header is present, `correlationId` is propagated, request body matches expected tool call arguments
+
+**Given** the test fixture library
+**When** loaded from `src/test/resources/fixtures/`
+**Then** the following fixtures exist and are loadable:
+- ACS fixtures: `audio-metadata.json`, `audio-hello-pcm24k.json`, `audio-silence.json`, `audio-malformed.json`, `dtmf-digit-3.json`
+- Voice Live fixtures: `session-created.json`, `response-audio-greeting.json`, `speech-started.json`, `response-done.json`, `tool-call-get-user-data.json`, `tool-call-send-invoice.json`, `tool-call-output-success.json`
+- Gateway fixtures: `user-data-response.json`, `send-invoice-response.json`
+
+**Given** the fixture library
+**When** used by FakeAcsClient, FakeVoiceLiveServer, or WireMock
+**Then** all fixtures are valid JSON or binary that exercises the real parsing paths of the production code
+
+---
+
+### Story 0.4: Spring Test Profile & Integration Test Scaffold
+
+As a **developer**,
+I want a Spring `test` profile that wires FakeAcsClient, FakeVoiceLiveServer, and WireMock into the application context with zero auth,
+So that `./mvnw test` passes with zero Azure credentials and zero network calls.
+
+**Acceptance Criteria:**
+
+**Given** the `test` Spring profile
+**When** active
+**Then** `application-test.yaml` configures:
+- Voice Live endpoint → `ws://localhost:{FakeVoiceLiveServer.port}`
+- APIM gateway base URL → `http://localhost:8082` (WireMock)
+- Auth disabled (no JWT validation, no managed identity token acquisition)
+- All timeouts set to test-friendly values (shorter than production)
+
+**Given** `./mvnw test` executed on a clean machine
+**When** no Azure environment variables, no `az login`, no network access
+**Then** all unit and integration tests pass (NFR-I5)
+
+**Given** the integration test scaffold
+**When** a `@SpringBootTest` integration test starts
+**Then** FakeVoiceLiveServer, WireMock, and the application context are started in-process — FakeAcsClient is instantiated per-test to connect to the running endpoint
+
+**Given** test isolation
+**When** multiple integration tests run sequentially
+**Then** each test gets a clean state — FakeVoiceLiveServer and WireMock are reset between tests, no cross-test contamination
+
+**Given** the scenario fixture file `fixtures/scenarios/happy-path.yaml`
+**When** loaded by an integration test
+**Then** it defines a scripted interaction sequence: ACS connects → sends audio → VL responds with greeting → ACS receives AI audio — and the test runner orchestrates FakeAcsClient + FakeVoiceLiveServer accordingly
 
 ---
 
